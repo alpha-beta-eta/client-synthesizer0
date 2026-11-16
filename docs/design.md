@@ -134,6 +134,7 @@ LLM从注释, 真实调用者 (vostd的调用点, 保留的ktest, Asterinas的�
 - **当作假设去检验** (生成新的client): `claim` (注释声称的性质), `protocol` (真实的调用序列). 它们失败就是候选.
 - **当作过滤或标签** (减少噪音): `role` (按角色传参), `assume` (真实调用者可假定的事实, 如引用计数不饱和; 作为client的requires: goal的种子调用的, protocol的种子调用的, claim所调用的API的, R1中G的只涉及client参数的 (换成G实际收到的实参; 涉及流过的值的不加, 它在入口不存在)), `prefer`, `limitation`, `not-defect` (只给失败加标签, 不删去任何client).
 - **当作API的判断**: `must-close` (3.3, 哪些类型的值必须按值传出). 它改变生成 (枚举在路径末尾关闭这些值), 所以`knowledge`检查它所说的类型是模块的数据类型.
+- 协议调用的API都要在某张表中, 否则是名字写错或条目丢了 (`protocol-outside`, 是问题). 例外是抽取按记下的原因留在表外的函数 (`left-out.rktd`: 闭包参数`closure-bound`, 写不出的类型): 那时协议不生成, 是表的表达力的限度, 不是知识的错, 记为注记`(protocol-left-out NAME (API REASON) ..)`, 模块仍是`ok`. 例: segment的7个协议从`Segment::from_unused`开始, 它的参数`metadata_fn: impl Fn(Paddr) -> (Paddr, M)`写不进表 (2026-11-16).
 
 知识可能是错的 (注释说要"much heavier proof", 实际只要一条循环不变式). 所以它只能缩小或标注, 不能当作判定.
 

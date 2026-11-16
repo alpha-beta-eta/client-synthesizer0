@@ -44,7 +44,7 @@
 
 1. **[工具]** 导出VIR (检出要干净): `cargo dv focus --package ostd -- --no-verify --log vir --log-dir <目录>`; `racket cli.rkt vir-cache <crate.vir> VIR`.
 2. **[工具]** `racket cli.rkt scan VIR '^ostd::(mm|sync)(::|$)' data/auto out/scan`. 核对: 每个模块的探针`ok`数, 与上一次的表逐个比较; 由`ok`变坏的分清是vostd还是工具. 一类条目一起坏是抽取的bug, 改合成器 (H), 不逐条手修.
-3. **[工具]** `racket cli.rkt knowledge data/auto data/auto/knowledge > out/<RUN>-knowledge.log`. 每个模块必须`ok`, `(anchors .. (lost 0) (ambiguous 0))`. `moved`的: `--fix`; 被标出漂移的条目 **[LLM]** 对照新源码重读, 读过之后才`--accept`. 不重读就不`--accept`.
+3. **[工具]** `racket cli.rkt knowledge data/auto data/auto/knowledge > out/<RUN>-knowledge.log`. 每个模块必须`ok`, `(anchors .. (lost 0) (ambiguous 0))`. `(protocol-left-out NAME (API REASON) ..)`不是问题: 协议调用了抽取时按记下的原因 (`left-out.rktd`: `closure-bound`等) 留在表外的API, 这个协议不生成; 记下条数和原因, 不停下. `(protocol-outside ..)` (调用的API不在表中, 也没有记下的原因) 才是问题. `moved`的: `--fix`; 被标出漂移的条目 **[LLM]** 对照新源码重读, 读过之后才`--accept`. 不重读就不`--accept`.
 
 ## C. 生成和运行 [工具]
 

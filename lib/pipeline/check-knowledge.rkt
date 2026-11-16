@@ -19,7 +19,7 @@
          "../model/api.rkt" "../check/client.rkt" "../model/knowledge.rkt" (only-in "../gen/families/claim.rkt" claim-clients)
          "../base/forms.rkt" "../model/knowledge-drift.rkt" "../vostd/git.rkt" "../base/env.rkt"
          "../check/knowledge-text.rkt")
-(provide check-knowledge update-knowledge!)
+(provide check-knowledge update-knowledge! left-out-reasons)
 
 (define (table-of auto m)
   (for/first ([d (in-list '("fixes" "apis"))]
@@ -120,9 +120,22 @@
 ;;   -> ((knowledge M (entries (KIND N) ...) STRUCTURE DRIFT ...) ...)
 ;;   STRUCTURE: ok, or (unknown-api KIND API) .. (protocol-outside NAME (API ..)) ..
 ;;              (ill-formed-claim NAME) ..
+;;   then notes: (protocol-left-out NAME (API REASON) ..), a protocol calling APIs the
+;;              extraction left out for REASON (left-out.rktd), not generated;
+;;              (uses-closed ..)
 ;;   DRIFT: (reviewed-at C) (checkout C) [(no-digests C)] (anchors ..) (lost ..) ..
 ;;          (ambiguous ..) .. (spec-changed API (KIND ..)) .. [(unrecorded N)]
 ;;   or (knowledge M (unreadable MESSAGE)), (knowledge M (no-table))
+;; left-out-reasons : auto-dir -> hash API-name -> REASON, the functions the
+;; extraction left out (AUTO/left-out.rktd, by VIR path: `ostd::`, the
+;; verified twin's `_VERUS_VERIFIED_` taken off, as the tables name them)
+(define (left-out-reasons auto)
+  (define f (build-path auto "left-out.rktd"))
+  (if (file-exists? f)
+      (for/hash ([x (in-list (file->list f))] #:when (and (pair? x) (string? (car x)) (pair? (cdr x))))
+        (values (string->symbol (regexp-replace* #rx"_VERUS_VERIFIED_" (regexp-replace #rx"^ostd::" (car x) "") ""))
+                (cadr x)))
+      (hash)))
 (define (check-knowledge auto kdir providers [only #rx""])
   (for*/list ([f (in-list (sort (map path->string (directory-list kdir)) string<?))]
               #:when (and (regexp-match? #rx"[.]rktd$" f) (regexp-match? only f)))
@@ -155,9 +168,23 @@
             `(unknown-api ,(car e) ,(cadr e)))
           (for/list ([ty (in-list (knowledge-must-close k))] #:unless (memq ty datatypes))
             `(unknown-type must-close ,ty))))
-       (define outside
-         (for/list ([p (in-list (knowledge-protocols k))] #:unless (andmap in-some-table? (cadr p)))
-           `(protocol-outside ,(car p) ,(filter (lambda (a) (not (in-some-table? a))) (cadr p)))))
+       ;; a protocol calling an API no table has: a problem (a wrong name, an entry
+       ;; lost), unless the extraction left the API out for a reason it recorded
+       ;; (left-out.rktd: a closure parameter, a type it cannot write); then the
+       ;; protocol is not generated, a limit of the tables, noted and not a problem
+       (define reasons (left-out-reasons auto))
+       (define-values (outside left)
+         (for/fold ([out '()] [lo '()] #:result (values (reverse out) (reverse lo)))
+                   ([p (in-list (knowledge-protocols k))])
+           (define missing (filter (lambda (a) (not (in-some-table? a))) (cadr p)))
+           (define unexplained (filter (lambda (a) (not (hash-ref reasons a #f))) missing))
+           (cond
+             [(null? missing) (values out lo)]
+             [(pair? unexplained) (values (cons `(protocol-outside ,(car p) ,unexplained) out) lo)]
+             [else (values out (cons `(protocol-left-out ,(car p)
+                                                         ,@(for/list ([a (in-list (remove-duplicates missing))])
+                                                             (list a (hash-ref reasons a))))
+                                     lo))])))
        (define ill (for*/list ([c (in-list (claim-clients t k))] [r (in-value (check-client t c))]
                                #:when (eq? (car r) 'ill-formed))
                      `(ill-formed-claim ,(cadr r))))
@@ -180,5 +207,6 @@
                    (entries ,@(for/list ([kind (in-list '(role protocol claim assume must-close prefer limitation not-defect))])
                                 (list kind (length (knowledge-entries k kind)))))
                    ,@(if (and (null? unknown) (null? outside) (null? ill) (null? bad)) '(ok) (append unknown outside ill bad))
+                   ,@left
                    ,@closed
                    ,@(drift-facts auto m (build-path kdir f) k))])))
