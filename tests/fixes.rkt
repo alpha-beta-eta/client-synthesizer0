@@ -92,3 +92,13 @@
   (check-equal? (map (lambda (f) (length (read-fixes (build-path d "f.rktd")))) '(1)) '(1))
   (check-equal? (read-no-fixes (build-path d "f.rktd")) '((("mm.io" "k") "trusted")))
   (delete-directory/files d))
+
+;; ostd's own result, not a dependency's; none when ostd reported nothing
+(check-equal? (ostd-results '(">> cargo-verus verify -p \"bitflags\"" "verification results:: 44 verified, 0 errors"
+                              ">> \"cargo-verus\" \"verify\" \"-p\" \"ostd\"" "verification results:: 1520 verified, 0 errors"))
+              '(1520 0))
+(check-false (ostd-results '("verification results:: 44 verified, 0 errors" ">> \"cargo-verus\" \"verify\" \"-p\" \"ostd\"" "Finished")))
+;; the dependencies reported inside ostd's command: ostd's is the last
+(check-equal? (ostd-results '(">> \"cargo-verus\" \"verify\" \"-p\" \"ostd\"" "verification results:: 44 verified, 0 errors"
+                              "verification results:: 1520 verified, 0 errors"))
+              '(1520 0))

@@ -41,7 +41,7 @@
 (require racket/file racket/list racket/match racket/string racket/path racket/pretty
          "../base/forms.rkt" "../base/env.rkt" "../vostd/run.rkt" "../vostd/git.rkt"
          "drops.rkt" "confirm.rkt" "evaluate.rkt" "groups.rkt" "compare.rkt")
-(provide fixes read-fixes read-no-fixes plan-edits map-line blame-fix-errors fix-slots norm-file function-at)
+(provide fixes read-fixes read-no-fixes ostd-results plan-edits map-line blame-fix-errors fix-slots norm-file function-at)
 
 ;; ================================================================ data
 
@@ -181,6 +181,17 @@
       (let ([after (filter (lambda (x) (and (equal? (cadr x) file) (> (caddr x) l))) fns)])
         (and (pair? after) (car (argmin caddr after))))))
 
+;; ostd-results : log lines -> (VERIFIED ERRORS) of ostd's own result, or #f: the
+;; last result after `-p "ostd"` (`dv verify -p ostd` verifies the dependencies,
+;; bitflags, in the same command, before ostd)
+(define (ostd-results lines)
+  (define after (let ([i (for/last ([l (in-list lines)] [k (in-naturals)] #:when (regexp-match? #px"\"-p\" \"ostd\"" l)) k)])
+                  (if i (drop lines i) '())))
+  (for/last ([l (in-list after)]
+             #:when (regexp-match? #px"verification results:: [0-9]+ verified, [0-9]+ errors" l))
+    (match (regexp-match #px"verification results:: ([0-9]+) verified, ([0-9]+) errors" l)
+      [(list _ v e) (list (string->number v) (string->number e))])))
+
 ;; fix-slots : (ID ...) (ID -> (F ...)) related? -> ((ID ...) ...)
 ;; Greedy: a fix goes into the first slot none of whose fixes is related to it;
 ;; a fix with no known function (bitflags, a spec outside the VIR) gets its own.
@@ -224,7 +235,11 @@
       (write-files! copy files)
       (define log (build-path dir (format "verus-r~a.out" n)))
       (verify-ostd copy target log)
-      (define-values (verified errors) (parse-verus (file->lines log)))
+      (define lines (file->lines log))
+      (define-values (_first errors) (parse-verus lines))
+      ;; ostd's own result: the dependencies (bitflags) report first, and a crate
+      ;; cargo-verus has verified before reports nothing; no ostd result, no round
+      (define verified (ostd-results lines))
       (define ids (map fix-id live))
       (define-values (blamed unblamed)
         (blame-fix-errors errors (lambda (f) (let ([v (hash-ref files f #f)]) (and v (cdr v)))) fn-at reaches? edited-fns ids (and verified #t)))
