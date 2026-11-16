@@ -42,7 +42,8 @@
     (define targets
       (remove-duplicates
        (for/list ([g (in-list (cddr mod))] #:when (and (pair? g) (eq? (car g) 'group)))
-         (cdr (assq 'at (cddr g))))))
+         ;; (at CLIENT ID [CULPRIT]): the probe is the client and the assertion
+         (take (cdr (assq 'at (cddr g))) 2))))
     (define line
       (if (null? targets)
           (format "~a: no failures" m)
