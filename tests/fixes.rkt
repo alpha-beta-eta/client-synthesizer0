@@ -84,3 +84,11 @@
 (let-values ([(f bad) (plan-edits (lambda (p) crlf) (list (fix* 'R8 '("c.rs" "  ensures x,\n{}" "  ensures x, w,\n{}"))))])
   (check-equal? bad '())
   (check-equal? (car (hash-ref f "c.rs")) "fn a()\r\n  ensures x, w,\r\n{}\r\n"))
+
+;; no-fix forms are kept for the record, not run
+(let ([d (make-temporary-file "cs-fixes-~a" 'directory)])
+  (with-output-to-file (build-path d "f.rktd")
+    (lambda () (writeln '(fix R9 (groups) (replace "a.rs" "x" "y"))) (writeln '(no-fix ("mm.io" "k") "trusted"))))
+  (check-equal? (map (lambda (f) (length (read-fixes (build-path d "f.rktd")))) '(1)) '(1))
+  (check-equal? (read-no-fixes (build-path d "f.rktd")) '((("mm.io" "k") "trusted")))
+  (delete-directory/files d))

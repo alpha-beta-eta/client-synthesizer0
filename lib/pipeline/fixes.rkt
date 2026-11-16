@@ -41,14 +41,18 @@
 (require racket/file racket/list racket/match racket/string racket/path racket/pretty
          "../base/forms.rkt" "../base/env.rkt" "../vostd/run.rkt" "../vostd/git.rkt"
          "drops.rkt" "confirm.rkt" "evaluate.rkt" "groups.rkt" "compare.rkt")
-(provide fixes read-fixes plan-edits map-line blame-fix-errors fix-slots norm-file function-at)
+(provide fixes read-fixes read-no-fixes plan-edits map-line blame-fix-errors fix-slots norm-file function-at)
 
 ;; ================================================================ data
 
 (struct fix (id groups why edits) #:transparent) ; edits: ((FILE OLD NEW) ...)
 
+;; (no-fix (M KEY) WHY): the writer found no spec-only fix for a group; not run,
+;; kept for the record (read-no-fixes)
+(define (read-no-fixes file)
+  (for/list ([x (in-list (file->list file))] #:when (and (pair? x) (eq? (car x) 'no-fix))) (cdr x)))
 (define (read-fixes file)
-  (for/list ([x (in-list (file->list file))])
+  (for/list ([x (in-list (file->list file))] #:unless (and (pair? x) (eq? (car x) 'no-fix)))
     (match x
       [`(fix ,id ,more ...)
        (define (part k) (cond [(assq k (filter pair? more)) => cdr] [else '()]))
