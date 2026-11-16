@@ -35,7 +35,7 @@
          "../analysis/attribute.rkt" "../vostd/git.rkt"
          (only-in "../gen/render.rkt" top->text)
          "groups.rkt" "drops.rkt")
-(provide provable clause-in-callee)
+(provide provable clause-in-callee unlabelled-group?)
 
 ;; clause-in-callee : table plan-form ID -> (values F TEXT-or-#f STATUS)
 (define (clause-in-callee table form id)
@@ -44,7 +44,8 @@
   (match (and e (culprit table form id))
     [(list f-name cid _)
      (define api (api-ref table f-name))
-     (define src (and api (form-ref api 'source #f)))
+     ;; (source none): no source record (extract.rkt), as no source at all
+     (define src (let ([s (and api (form-ref api 'source #f))]) (and (pair? s) (not (equal? s '(none))) s)))
      (define (s k) (cond [(and (pair? src) (assq k src)) => cdr] [else '()]))
      (define call (plan-stmt body cid))
      (cond
@@ -134,9 +135,14 @@
                    'expressed)])])]
     [_ (values #f #f 'no-culprit)]))
 
-;; provable : run-dir copy [module-regex] [#:dry? B] -> facts
+;; provable : run-dir copy [module-regex] [#:dry? B] [#:unlabelled (KNOWLEDGE-DIR ISSUES-DIR VERDICTS-DIR)] -> facts
 ;; dry?: the groups tried and their clauses in F's terms, nothing verified
-(define (provable run-dir copy [only #rx""] #:dry? [dry? #f])
+;; unlabelled: only the groups `groups` shows with no label (or a stale
+;; verdict only, which is to be judged again), with these directories: the
+;; new failures of a run, without trying again what is judged or known
+(define (unlabelled-group? g)
+  (null? (filter (lambda (l) (not (eq? (car l) 'stale-verdict))) (cdr (assq 'labels (cddr g))))))
+(define (provable run-dir copy [only #rx""] #:dry? [dry? #f] #:unlabelled [ul #f])
   (define vostd (env-ref 'vostd))
   (define out (build-path run-dir "provable"))
   (define commit (cadr (assq 'commit (cdr (file->value (build-path run-dir "manifest.rktd"))))))
@@ -150,12 +156,15 @@
       (error 'provable "~a has changes in ostd/: give a clean copy" copy)))
   ;; (M KEY CLIENT ID F STATUS TEXT): every group tried, cand ids by (F . TEXT)
   (define tried
-    (for*/list ([mod (in-list (group-failures run-dir #f only))]
+    (for*/list ([mod (in-list (if ul
+                                  (group-failures run-dir (car ul) only (cadr ul) #:verdicts (caddr ul))
+                                  (group-failures run-dir #f only)))]
                 [m (in-value (cadr mod))]
                 [table (in-value (read-api-table (build-path run-dir "tables" (string-append m ".rktd"))))]
                 [plan (in-value (let ([f (build-path run-dir "results" m "plan.rktd")]) (if (file-exists? f) (file->list f) '())))]
                 [g (in-list (cddr mod))]
                 #:when (and (pair? g) (eq? (car g) 'group))
+                #:when (or (not ul) (unlabelled-group? g))
                 [labels (in-value (cdr (assq 'labels (cddr g))))]
                 #:unless (assoc 'noise labels)
                 #:unless (equal? (assq 'refute (cddr g)) '(refute refuted)))

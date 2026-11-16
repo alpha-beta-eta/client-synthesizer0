@@ -34,7 +34,7 @@
 ;;   racket cli.rkt groups   RUN-DIR [KNOWLEDGE-DIR [ISSUES-DIR]] [MODULE-REGEX] [--verdicts DIR [--digests FILE]]
 ;;                           failures grouped by clause, labelled, with culprits and verdicts
 ;;   racket cli.rkt refute   RUN-DIR [MODULE-REGEX]      each group's assertion negated
-;;   racket cli.rkt provable RUN-DIR COPY [MODULE-REGEX] [--dry]
+;;   racket cli.rkt provable RUN-DIR COPY [MODULE-REGEX] [--dry] [--unlabelled KNOWLEDGE ISSUES VERDICTS]
 ;;                           each group's clause added to its culprit's ensures in COPY
 ;;   racket cli.rkt confirm  RUN-DIR COPY VIR [MODULE-REGEX] [--dry]
 ;;                           provable's survivors confirmed one by one, the failed clients rerun
@@ -189,8 +189,14 @@
      (define rx (let ([r (if idir (cdr more2) more2)]) (if (pair? r) (regexp (car r)) #rx"")))
      (for-each pretty-write (group-failures dir kdir rx idir #:verdicts (opt "--verdicts") #:digests (opt "--digests")))]
     [(vector "provable" dir copy more0 ...)
-     (define more (remove "--dry" more0))
-     (void (provable dir copy (if (pair? more) (pregexp (car more)) #rx"") #:dry? (and (member "--dry" more0) #t)))]
+     ;; --unlabelled KNOWLEDGE-DIR ISSUES-DIR VERDICTS-DIR
+     (define ul (let ([t (member "--unlabelled" more0)])
+                  (and t (if (>= (length t) 4) (take (cdr t) 3)
+                             (error 'provable "--unlabelled KNOWLEDGE-DIR ISSUES-DIR VERDICTS-DIR")))))
+     (define more (let ([m (remove "--dry" more0)])
+                    (if ul (let-values ([(a b) (splitf-at m (lambda (x) (not (equal? x "--unlabelled"))))]) (append a (drop b 4))) m)))
+     (void (provable dir copy (if (pair? more) (pregexp (car more)) #rx"") #:dry? (and (member "--dry" more0) #t)
+                     #:unlabelled ul))]
     [(vector "confirm" dir copy vir more0 ...)
      (define more (remove "--dry" more0))
      (void (confirm dir copy vir (if (pair? more) (pregexp (car more)) #rx"") #:dry? (and (member "--dry" more0) #t)))]
