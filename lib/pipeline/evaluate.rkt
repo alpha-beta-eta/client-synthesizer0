@@ -33,7 +33,10 @@
 ;; that m does not import).  What is in scope there is known only to rustc:
 ;; after a run, the import suggestions of its compile errors (one candidate,
 ;; as in repair.rkt) join the table's uses and the module runs again, in
-;; results/<m>/imports/; that run is kept unless fewer clients verify.
+;; results/<m>/imports/; that run is kept unless fewer clients verify.  A use
+;; line of the run's own table that rustc reports private (E0603: another
+;; module named through a private child of the parent) is taken out in the
+;; same round, recorded as (dropped-imports ..).
 ;;
 ;; Verus may crash on a large module (a panic in the solver, out of memory);
 ;; then the clients run again in two halves, results/<m>/1 and /2,
@@ -45,7 +48,7 @@
          (only-in "../analysis/repair.rkt" import-suggestion choose-uses)
          (only-in "../check/client.rkt" check-client)
          (only-in "../gen/enum.rkt" current-none-vacuous))
-(provide evaluate read-config summary-line probe-ok probe-none-vacuous generate-module vostd-state verus-version restore-lock runner-version
+(provide evaluate read-config private-uses without-uses summary-line probe-ok probe-none-vacuous generate-module vostd-state verus-version restore-lock runner-version
          config-auto config-providers table-of module-of write-module-table must-close-of run-module)
 
 (define min-split 16)
@@ -200,28 +203,73 @@
 ;; of a trait not in scope), so the suggestions of the next stage appear
 ;; only after a round.  A round is kept only if no client that verified
 ;; stops verifying; the rounds' directories are DIR/imports, imports-2, ..
+;; A use line of the table's own (uses ..) forms that rustc reports private
+;; (E0603) is taken out in the same round: it names a module through a private
+;; child (`use crate::mm::page_table::cursor::*;`, write-module-table's import
+;; of another module, from the client module beside page_table), which no
+;; caller outside the parent can write either; the parent's re-exports, or the
+;; suggestions of the next round, supply the names (design.md 3.8).
 (define import-rounds 3)
 (define (run-with-imports target table-file cs dir)
   (define results0 (run-split target table-file cs dir))
-  (let loop ([results results0] [all '()] [round 1])
-    (define extra (and (<= round import-rounds)
-                       (import-uses results (api-table-uses (read-api-table table-file)))))
+  (define (report results added dropped)
+    (append (if (null? added) '() `((imports ,@added)))
+            (if (null? dropped) '() `((dropped-imports ,@dropped)))
+            results))
+  (let loop ([results results0] [rdir dir] [added '()] [dropped '()] [round 1])
+    (define forms (file->list table-file))
+    (define extra (if (<= round import-rounds)
+                      (import-uses results (api-table-uses (read-api-table table-file)))
+                      '()))
+    (define private (if (<= round import-rounds) (private-uses results rdir forms) '()))
     (cond
-      [(or (not extra) (null? extra))
-       (unless (null? all)
-         (write-forms (build-path dir "results.rktd") (append `((imports ,@all)) results)))
-       (if (null? all) results (append `((imports ,@all)) results))]
+      [(and (null? extra) (null? private))
+       (define rs (report results added dropped))
+       (unless (and (null? added) (null? dropped))
+         (write-forms (build-path dir "results.rktd") rs))
+       rs]
       [else
-       (define forms (file->list table-file))
-       (write-forms table-file (append forms `((uses ,@extra))))
-       (define next (run-split target table-file cs
-                               (build-path dir (if (= round 1) "imports" (format "imports-~a" round)))))
+       (write-forms table-file (append (without-uses forms private)
+                                       (if (null? extra) '() `((uses ,@extra)))))
+       (define ndir (build-path dir (if (= round 1) "imports" (format "imports-~a" round))))
+       (define next (run-split target table-file cs ndir))
        (cond
          [(>= (count-verified next) (count-verified results))
-          (loop next (append all extra) (add1 round))]
+          (loop next ndir (append added extra) (append dropped private) (add1 round))]
          [else
           (write-forms table-file forms)
-          (loop results all (add1 import-rounds))])])))
+          (loop results rdir added dropped (add1 import-rounds))])])))
+
+;; private-uses : results run-dir table-forms -> (use-line ...)
+;; The use lines of the table file's own (uses ..) forms (not its bases') at
+;; which the run's unattributed errors are E0603: the line of the rendered
+;; clients.rs the error points at is that use line.
+(define (private-uses results rdir forms)
+  (define own (append* (for/list ([f (in-list forms)] #:when (and (pair? f) (eq? (car f) 'uses))) (cdr f))))
+  (define rendered (build-path rdir "clients.rs"))
+  (define lines (if (file-exists? rendered) (list->vector (file->lines rendered)) (vector)))
+  (remove-duplicates
+   (for*/list ([r (in-list results)]
+               #:when (and (pair? r) (eq? (car r) 'unattributed) (= (length r) 3)
+                           (regexp-match? #rx"^\\[E0603\\]" (cadr r)))
+               [n (in-value (match (regexp-match #rx":([0-9]+)$" (caddr r))
+                              [(list _ k) (string->number k)] [_ #f]))]
+               #:when (and n (<= 1 n (vector-length lines)))
+               [text (in-value (string-trim (vector-ref lines (sub1 n))))]
+               #:when (member text own))
+     text)))
+
+;; without-uses : table-forms (use-line ...) -> table-forms, the lines taken
+;; out of the (uses ..) forms (a form left empty goes)
+(define (without-uses forms lines)
+  (if (null? lines)
+      forms
+      (for*/list ([f (in-list forms)]
+                  [g (in-value (if (and (pair? f) (eq? (car f) 'uses))
+                                   (cons 'uses (filter (lambda (u) (not (member u lines))) (cdr f)))
+                                   f))]
+                  #:unless (equal? g '(uses)))
+        g)))
 
 ;; A failed client all of whose errors are at clauses `P ==> may_panic()`
 ;; (asserted by the client, or a callee's precondition: results.rkt).
