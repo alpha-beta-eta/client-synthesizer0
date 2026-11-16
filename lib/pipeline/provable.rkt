@@ -35,7 +35,7 @@
          "../analysis/attribute.rkt" "../vostd/git.rkt"
          (only-in "../gen/render.rkt" top->text)
          "groups.rkt" "drops.rkt")
-(provide provable clause-in-callee unlabelled-group?)
+(provide provable clause-in-callee unlabelled-group? read-selection)
 
 ;; clause-in-callee : table plan-form ID -> (values F TEXT-or-#f STATUS)
 (define (clause-in-callee table form id)
@@ -142,9 +142,33 @@
 ;; new failures of a run, without trying again what is judged or known
 (define (unlabelled-group? g)
   (null? (filter (lambda (l) (not (eq? (car l) 'stale-verdict))) (cdr (assq 'labels (cddr g))))))
+;;
+;; The groups a provable directory tries are fixed by its first run, in
+;; RUN-DIR/provable/selection.rktd, (selection MODE (M KEY) ...), MODE
+;; unlabelled | all: a resumed run is the same experiment.  Chosen again by
+;; the labels, a verdict written meanwhile (workflow F) takes its group out,
+;; the candidates differ from cand.rktd (whose order rounds.rktd's blame
+;; indexes) and the directory could not be resumed.  A directory from before
+;; selection.rktd takes its groups from facts.rktd.  Another MODE, or a
+;; recorded group the run no longer has, is refused: a new directory.
+(define (read-selection out)
+  (define sel (build-path out "selection.rktd"))
+  (define facts (build-path out "facts.rktd"))
+  (cond
+    [(file-exists? sel)
+     (match (file->value sel) [`(selection ,mode ,gs ...) (values mode gs)])]
+    [(file-exists? facts)
+     (values #f (remove-duplicates (for/list ([f (in-list (file->list facts))]) (list (cadr f) (caddr f)))))]
+    [else (values #f #f)]))
 (define (provable run-dir copy [only #rx""] #:dry? [dry? #f] #:unlabelled [ul #f])
   (define vostd (env-ref 'vostd))
   (define out (build-path run-dir "provable"))
+  (define mode (if ul 'unlabelled 'all))
+  (define-values (rec-mode recorded) (read-selection out))
+  (when (and rec-mode (not (eq? rec-mode mode)))
+    (error 'provable "~a tried the ~a groups, not the ~a ones: give a new directory (remove it to start again)" out rec-mode mode))
+  (define (selected? m g)
+    (if recorded (member (list m (cadr g)) recorded) (or (not ul) (unlabelled-group? g))))
   (define commit (cadr (assq 'commit (cdr (file->value (build-path run-dir "manifest.rktd"))))))
   (unless dry?
     (when (equal? (simplify-path (path->complete-path copy)) (simplify-path (path->complete-path vostd)))
@@ -164,7 +188,7 @@
                 [plan (in-value (let ([f (build-path run-dir "results" m "plan.rktd")]) (if (file-exists? f) (file->list f) '())))]
                 [g (in-list (cddr mod))]
                 #:when (and (pair? g) (eq? (car g) 'group))
-                #:when (or (not ul) (unlabelled-group? g))
+                #:when (selected? m g)
                 [labels (in-value (cdr (assq 'labels (cddr g))))]
                 #:unless (assoc 'noise labels)
                 #:unless (equal? (assq 'refute (cddr g)) '(refute refuted)))
@@ -184,6 +208,14 @@
       (define file (car (regexp-match #px"^[^:]+" span)))
       `(cand ,(or (list-ref t 7) (format "~a" (car k))) ,(format "~a" (car k)) ,file ,span
              ,(format "triage ~a ~a" (list-ref t 0) (list-ref t 1)) "" ,(cdr k) ,(cdr k))))
+  (define now (for/list ([t (in-list tried)]) (list (car t) (cadr t))))
+  (when recorded
+    (define gone (filter (lambda (k) (not (member k now))) recorded))
+    (unless (null? gone)
+      (error 'provable "~a: ~a recorded group(s) are not in the run now (the first: ~s): remove the directory to start again"
+             out (length gone) (car gone))))
+  (unless (or dry? (file-exists? (build-path out "selection.rktd")))
+    (write-to-file `(selection ,mode ,@now) (build-path out "selection.rktd")))
   (when dry?
     (for ([t (in-list tried)])
       (match-define (list m key client id f status text _ _) t)
@@ -193,11 +225,20 @@
 (define (verify-and-report out tried cand-keys cands copy)
   (unless (file-exists? (build-path out "cand.rktd"))
     (with-output-to-file (build-path out "cand.rktd") (lambda () (for ([c (in-list cands)]) (writeln c)))))
-  (define cands-now (file->list (build-path out "cand.rktd")))
-  (unless (equal? cands-now cands)
+  ;; the candidates as a set, by (F . TEXT): their order (and which group's name a
+  ;; shared one carries) follows the groups' order, which puts first the groups
+  ;; this very analysis proved (groups.rkt); rounds.rktd's blame indexes cand.rktd,
+  ;; so its order is the one kept
+  (define (cand-key c) (cons (list-ref c 2) (list-ref c 7)))
+  (define (key-string k) (cons (format "~a" (car k)) (cdr k)))
+  (define recorded (file->list (build-path out "cand.rktd")))
+  (unless (and (= (length recorded) (length cands))
+               (equal? (sort (map cand-key recorded) string<? #:key (lambda (k) (format "~s" k)))
+                       (sort (map cand-key cands) string<? #:key (lambda (k) (format "~s" k)))))
     (error 'provable "~a has other candidates than the groups give now: remove the directory to start again" out))
-  (printf "~a groups tried, ~a candidates\n" (length tried) (length cands))
-  (define rounds (if (null? cands) '() (verify-rounds copy cands out (lambda () (restore copy)))))
+  (define cand-index (for/hash ([c (in-list recorded)] [i (in-naturals)]) (values (cand-key c) i)))
+  (printf "~a groups tried, ~a candidates\n" (length tried) (length recorded))
+  (define rounds (if (null? recorded) '() (verify-rounds copy recorded out (lambda () (restore copy)))))
   (define blamed (for*/hash ([r (in-list rounds)] #:when (eq? (car r) 'round)
                              [b (in-list (cddddr r))] [i (in-list (cdr b))])
                    (values i (car b))))
@@ -205,7 +246,7 @@
     (for/list ([t (in-list tried)])
       (match-define (list m key client id f status text _ _) t)
       (define st (if (eq? status 'expressed)
-                     (hash-ref blamed (index-of cand-keys (cons f text)) 'proved)
+                     (hash-ref blamed (hash-ref cand-index (key-string (cons f text))) 'proved)
                      status))
       `(provable ,m ,key ,client ,id ,f ,st ,@(if text (list text) '()))))
   (with-output-to-file (build-path out "facts.rktd") #:exists 'truncate
