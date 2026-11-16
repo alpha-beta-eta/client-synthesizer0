@@ -17,12 +17,17 @@
 ;;             Verus blames there, `together-only` (it needs one of the
 ;;             clauses of its function or of the functions it calls: (needs
 ;;             ID ...), not narrowed further).  An error in a function with no
-;;             candidate (an existing proof: fill's loop, once write_val says
-;;             more) is put down to the slot's clauses of the functions that
-;;             function calls, for the same reason: `breaks-caller` (the
-;;             clause holds, but alone it makes a caller's proof fail; with
-;;             all of provable's clauses that proof went through).  An error
-;;             put down to no clause stops, as before
+;;             candidate (an existing proof: VmWriter::fill's loop, in slot 3
+;;             of r1) is put down to the slot's clauses that can reach that
+;;             function's query: of the functions it calls (its proof assumes
+;;             their ensures), or of the same Verus module (Verus checks a
+;;             module's functions in one solver, so a change of one query
+;;             moves the others: fill calls none of the slot's functions, but
+;;             write_val, write_once and read are in mm::io too).  They are
+;;             `breaks-proof`: the clause holds, but alone it makes an existing
+;;             proof fail (with all of provable's clauses that proof went
+;;             through: a brittle proof, a cost of the change).  An error put
+;;             down to no clause stops, as before
 ;;   trusted   what F's proof may rest on that Verus does not check: the
 ;;             source's `assume` and `admit` in F's body (trusted.rkt's
 ;;             sites in the body's lines), F's callees that are external_body
@@ -46,7 +51,7 @@
 ;; and
 ;;   facts.rktd
 ;;     (clause ID F ALONE (slot K) [(needs ID ...)] [(rests-on (assume FILE:LINE DETAIL) .. (external-body G) ..)] TEXT)
-;;       ALONE = alone | together-only KIND | breaks-caller     (KIND: drops.rkt's blame)
+;;       ALONE = alone | together-only KIND | breaks-proof     (KIND: drops.rkt's blame)
 ;;     (group M KEY ID STATUS (before N) (after N) (clients N N) (at CLIENT ID AT) CONFIRMED)
 ;;       STATUS = fixed | reduced | unchanged | no-clients   (by F's clients, before/after)
 ;;       AT = fixed | fails | not-run                        (the very failure)
@@ -62,7 +67,7 @@
          "../vostd/vir.rkt" "../vostd/git.rkt" "../vostd/trusted.rkt"
          (only-in "../analysis/drops.rkt" vir-calls)
          "groups.rkt" "drops.rkt" "evaluate.rkt")
-(provide confirm slots group-status norm-path vir-facts enclosing-function)
+(provide confirm slots group-status norm-path vir-facts enclosing-function fn-module reaches?)
 
 ;; ================================================================ pure parts
 
@@ -130,6 +135,18 @@
           (lambda (g) (let ([x (hash-ref checked g #f)]) (and x (eb? x))))
           ;; every function with a body: (F FILE FIRST LAST)
           (for/list ([(k r) (in-hash ranges)] #:when r) (cons k r))))
+
+;; fn-module : function name -> its Verus module ("mm::io::impl&%0::fill" -> "mm::io")
+(define (fn-module f)
+  (match (regexp-match #rx"^(.*?)::(impl&%[0-9]+::)?[^:]+$" (format "~a" f))
+    [(list _ p _) p]
+    [_ #f]))
+
+;; reaches? : calls-of F G -> can a change of G's ensures move F's proof:
+;; F calls G, or they are in the same module (one solver for a module)
+(define (reaches? calls-of f g)
+  (or (and (member g (calls-of f)) #t)
+      (let ([a (fn-module f)]) (and a (equal? a (fn-module g))))))
 
 ;; enclosing-function : ((F FILE FIRST LAST) ...) file line -> F or #f
 ;; The innermost body that holds the line (a closure's or a nested function's
@@ -232,12 +249,12 @@
       (unless (or (file-exists? (build-path dir "rounds.rktd")) (clean? copy))
         (error 'confirm "~a has changes in ostd/: give a clean copy" copy))
       (printf "slot ~a: ~a clauses\n" k (length s))
-      ;; an error in a function that is no candidate's: the slot's clauses of the
-      ;; functions it calls (slots keep related clauses apart for the same reason)
+      ;; an error in a function that is no candidate's: the slot's clauses that
+      ;; reach its query (reaches?: a callee, or the same module)
       (define (callers e)
         (define f (and (list-ref e 1) (list-ref e 2) (enclosing-function fns (list-ref e 1) (list-ref e 2))))
         (if f
-            (for/list ([j (in-range (length s))] #:when (member (cand-f (list-ref s j)) (calls-of f))) j)
+            (for/list ([j (in-range (length s))] #:when (reaches? calls-of f (cand-f (list-ref s j)))) j)
             '()))
       (define rounds (verify-rounds copy cs dir (lambda () (restore copy)) #:callers callers))
       (define bl (for*/hash ([r (in-list rounds)] #:when (eq? (car r) 'round)
@@ -247,7 +264,7 @@
         (hash-set h i (match (hash-ref bl i #f)
                         [#f 'alone]
                         ;; the clause holds, but alone it makes a caller's existing proof fail
-                        ['breaks-caller '(breaks-caller)]
+                        ['breaks-proof '(breaks-proof)]
                         [kind (list 'together-only kind)])))))
   ;; ---------------------------------------------------------------- clients
   (restore copy)
@@ -303,7 +320,7 @@
     (for/list ([i (in-list survivors)])
       (define f (cand-f i))
       (define a (hash-ref alone i))
-      (define needs (if (or (eq? a 'alone) (equal? a '(breaks-caller))) '()
+      (define needs (if (or (eq? a 'alone) (equal? a '(breaks-proof))) '()
                         (for/list ([j (in-list survivors)]
                                    #:unless (= j i)
                                    #:when (or (equal? (cand-f j) f) (member (cand-f j) (calls-of f))))

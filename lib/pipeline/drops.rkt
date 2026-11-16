@@ -144,8 +144,8 @@
 ;; until a round blames none.  OUT/rounds.rktd, OUT/verus-rN.out,
 ;; OUT/survivors.patch; resumes from rounds.rktd; COPY restored at the end.
 ;; callers: error -> (ID ...), for an error no /*DROP:ID*/ line names: the
-;; candidates it is put down to (confirm.rkt: those of the functions the failing
-;; function calls, its proof assumes their ensures), blamed as breaks-caller.
+;; candidates it is put down to (confirm.rkt: those that reach the failing
+;; function's query, a callee's or one of the same module), blamed as breaks-proof.
 ;; An error it puts down to none stops the analysis, as before.
 (define (verify-rounds copy cands out reset #:callers [callers (lambda (e) '())])
   (define (o f) (build-path out f))
@@ -167,13 +167,13 @@
       (define-values (verified errors) (parse-verus lines))
       (define-values (blamed0 unblamed0) (blame errors (line-reader copy) (and verified #t)))
       ;; an error in a function that is not a candidate: an existing proof the
-      ;; added ensures of a callee broke (fill's loop after write_val's: the
-      ;; context changed, not the clause wrong)
+      ;; added ensures moved (fill's loop, once mm::io's write_val said more:
+      ;; the solver's context changed, not the clause wrong)
       (define by-caller
         (for/list ([e (in-list unblamed0)]) (cons e (filter (lambda (i) (not (memv i excluded))) (callers e)))))
       (define unblamed (for/list ([x (in-list by-caller)] #:when (null? (cdr x))) (car x)))
       (define caller-ids (sort (remove-duplicates (append* (map cdr by-caller))) <))
-      (define blamed (if (null? caller-ids) blamed0 (append blamed0 (list (cons 'breaks-caller caller-ids)))))
+      (define blamed (if (null? caller-ids) blamed0 (append blamed0 (list (cons 'breaks-proof caller-ids)))))
       (cond
         [(pair? unblamed)
          (restore copy)
