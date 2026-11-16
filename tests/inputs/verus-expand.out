@@ -1,0 +1,58 @@
+error: assertion failed
+  --> ostd/src/mm/vm_space/cs_clients.rs:22:12
+   |
+22 |     assert(self_.clone_requires((*perm))); // requires of mm::vm_space::impl&%5::clone
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ assertion failed
+
+error: assertion failed
+  --> ostd/src/mm/vm_space/cs_clients.rs:23:12
+   |
+23 |     assert(false); // vacuity: must fail
+   |            ^^^^^ assertion failed
+
+note: diagnostics via expansion
+      
+      self_.clone_requires((mut_ref_current(perm)))
+      |   self_.frame.clone_requires((mut_ref_current(perm)))
+      |   |   let paddr = self_.frame.start_paddr_spec();
+      |   |       let ref_count = (mut_ref_current(perm)).slot_owner(paddr).ref_count();
+      |   |           self_.frame.inv() ✔
+      |   |           (mut_ref_current(perm)).inv() ✔
+      |   |           self_.frame.wf_with_region((mut_ref_current(perm))) ✔
+      |   |           ref_count > 0 ✔
+      |   |           !(ref_count == REF_COUNT_UNUSED()) ✘
+      |   |           ref_count >= REF_COUNT_MAX() ==>
+      |   |               may_panic() ✘
+      |   |                   function is uninterpreted
+      |   +---
+      +---
+      
+   --> ostd/src/mm/frame/mod.rs:592:13
+    |
+592 |         &&& ref_count != REF_COUNT_UNUSED
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+593 |         &&& ref_count >= REF_COUNT_MAX ==> may_panic()
+    |                                            ^^^^^^^^^^^
+
+error: assertion failed
+  --> ostd/src/mm/vm_space/cs_clients.rs:99:12
+   |
+99 |     assert(((*self_).0.find_next_panic_condition(len) ==> vstd_extra::panic::may_panic())); // requires of mm::v...
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ assertion failed
+
+error: assertion failed
+   --> ostd/src/mm/vm_space/cs_clients.rs:100:12
+    |
+100 |     assert(false); // vacuity: must fail
+    |            ^^^^^ assertion failed
+
+note: diagnostics via expansion
+      
+      (mut_ref_current(self_)).0.find_next_panic_condition(len) ==>
+          may_panic() 
+              function is uninterpreted
+      
+
+note: verifying module mm::vm_space::cs_clients, function ostd::mm::vm_space::cs_clients::repeat_mm__vm_space__impl__6__lemma_raw_item_well_formed_preserved
+
+verification results:: 0 verified, 4 errors

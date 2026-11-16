@@ -1,0 +1,17 @@
+# item-index (from ensures-coverage): the functions of Rust/Verus source files,
+# parsed with Verus's syn (lib/vostd/extract.rkt).  verus_syn is the one in the
+# vostd checkout's Verus; the path assumes the checkout at work/vostd (env.rktd),
+# change it if yours is elsewhere.  Build:
+#   cargo build --release --manifest-path tools/item-index/Cargo.toml --target-dir work/ii
+# and copy work/ii/release/item-index(.exe) to work/bin/ (env.rktd's item-index).
+[package]
+name = "item-index"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+verus_syn = { path = "../../work/vostd/tools/verus/dependencies/syn", features = ["full", "parsing", "printing"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+quote = "1"
+
+[workspace]

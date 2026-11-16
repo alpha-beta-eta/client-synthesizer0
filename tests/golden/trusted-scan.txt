@@ -1,0 +1,27 @@
+;; tests/inputs/trusted-v1.rs
+(external-body "t.rs" "Frame::max_paddr" "" 11 "ba2e9e65143e")
+(assume "t.rs" "Frame::eq" "self.ptr_inv()" 26 "568e365a66de")
+(assume "t.rs" "Frame::eq" "other.ptr_inv()" 27 "568e365a66de")
+(external-body "t.rs" "<Frame as NonNullPtr>::ALIGN_BITS" "" 36 "d9a60ce2b864")
+(assume
+ "t.rs"
+ "<Frame as NonNullPtr>::into_raw"
+ "self.inv()"
+ 40
+ "d08d4f91a873")
+(external "t.rs" "<Frame as Send>" "" 45 "48a8cbfa3c86")
+(axiom "t.rs" "axiom_insert" "" 48 "7562c6098f8d")
+(assume-specification "t.rs" "[SmallVec::<A>::index]" "" 53 "7092fee1d88e")
+(admit "t.rs" "wait" "" 60 "f1c4ea85bc69")
+(admit "t.rs" "wait" "#2" 62 "f1c4ea85bc69")
+;; tests/inputs/trusted-v2.rs
+(external-body "t.rs" "Frame::max_paddr" "" 13 "d04d9d032df5")
+(assume "t.rs" "Frame::eq" "self.ptr_inv()" 29 "568e365a66de")
+(assume "t.rs" "Frame::eq" "other.ptr_inv()" 31 "568e365a66de")
+(external-body "t.rs" "Frame::acquire_fence" "" 38 "1685b6bd0358")
+(external-body "t.rs" "<Frame as RawPtr>::ALIGN_BITS" "" 43 "d9a60ce2b864")
+(assume "t.rs" "<Frame as RawPtr>::into_raw" "self.inv()" 47 "d08d4f91a873")
+(axiom "t.rs" "axiom_insert" "" 52 "7562c6098f8d")
+(assume-specification "t.rs" "[SmallVec::<A>::index]" "" 57 "7092fee1d88e")
+(admit "t.rs" "wait" "" 64 "f1c4ea85bc69")
+(admit "t.rs" "wait" "#2" 66 "f1c4ea85bc69")

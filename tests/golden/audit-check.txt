@@ -1,0 +1,49 @@
+(audit
+ "t"
+ (at "1111111")
+ (verdicts 10)
+ (removed 1)
+ (judged-sites 9)
+ (faithful 5)
+ (too-strong 3)
+ (weak 2))
+(changed
+ "t#1"
+ external-body
+ "t.rs"
+ "Frame::max_paddr"
+ ""
+ (line 13)
+ (fp "ba2e9e65143e" "d04d9d032df5"))
+(renamed
+ "t#3"
+ (from external-body "t.rs" "<Frame as NonNullPtr>::ALIGN_BITS" "")
+ (to external-body "t.rs" "<Frame as RawPtr>::ALIGN_BITS" "")
+ (line 43))
+(renamed
+ "t#4"
+ (from assume "t.rs" "<Frame as NonNullPtr>::into_raw" "self.inv()")
+ (to assume "t.rs" "<Frame as RawPtr>::into_raw" "self.inv()")
+ (line 47))
+(gone "t#5" external "t.rs" "<Frame as Send>" "")
+(unjudged "t" external-body "t.rs" "Frame::acquire_fence" "" (line 38))
+(unjudged "t" admit "t.rs" "wait" "#2" (line 66))
+(disagree
+ assume-specification
+ "t.rs"
+ "[SmallVec::<A>::index]"
+ ""
+ ("t#8" faithful)
+ ("t#9" weak))
+(demo "t#1" "d.rs" "demo_max" verified)
+(demo "t#4" "d.rs" "demo_forge" failed)
+(outside 0)
+;; ---- accepted
+("t#1")
+(verdict
+ "t#1"
+ too-strong
+ (site external-body "t.rs" "Frame::max_paddr" "" (fp "d04d9d032df5"))
+ (reason "r1")
+ (demo "d.rs" "demo_max"))
+(at "2222222")

@@ -1,0 +1,41 @@
+;; tests/inputs/spec-v1.rs reference_count
+/// Gets the reference count of the frame.
+///
+/// The count can change at any time.
+#[verus_spec(
+with
+Tracked(slot_own): Tracked<&MetaSlotOwner>,
+requires
+self.ptr_inv(),
+forall|i: int|
+#[trigger] slot_own.paths(i) ==> i >= 0,
+returns
+slot_own.ref_count(),
+)]
+pub fn reference_count(&self) -> u64 {
+;; tests/inputs/spec-v1.rs size
+#[verifier::external_body]
+pub fn size(&self) -> usize
+ensures
+res == PAGE_SIZE,
+{
+;; tests/inputs/spec-v2.rs reference_count
+/// Gets the reference count of the frame.
+///
+/// The count can change at any time.
+#[verus_spec(
+with
+Tracked(slot_own): Tracked<&MetaSlotOwner>,
+requires
+self.ptr_inv(),
+forall|i: int|
+#[trigger] slot_own.paths(i) ==> i >= 0,
+returns
+slot_own.ref_count(),
+)]
+pub fn reference_count(&self) -> u64 {
+;; tests/inputs/spec-v2.rs size
+pub fn size(&self) -> usize
+ensures
+res == PAGE_SIZE,
+{

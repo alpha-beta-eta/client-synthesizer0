@@ -1,0 +1,140 @@
+#lang racket/base
+;; Known issues (lib/model/issues.rkt) and the report (lib/pipeline/regress.rkt)
+;; on results written by hand: no Verus, no vostd.
+(require rackunit racket/file racket/list "../lib/model/issues.rkt" "../lib/base/forms.rkt"
+         (only-in "../lib/pipeline/regress.rkt" regress-report)
+         (only-in "../lib/pipeline/groups.rkt" group-failures))
+
+(define (client n) `(client ,n (params) (body)))
+(define issues-forms
+  `((issue A (title "next gives no postcondition") (source "record D3") (fix "top7.patch")
+           (witness (module "m.seg") (fails (requires next 1)) ,(client 'c1))
+           (witness (module "m.seg") (fails (claim)) ,(client 'c2)))
+    (issue B (title "round trip") (no-witness "needs identity.rktd"))
+    (issue C (title "gone upstream") (witness (module "m.seg") (fails (claim)) ,(client 'c3)))
+    (issue D (title "signature changed") (witness (module "m.other") (fails (claim)) ,(client 'c4)))
+    ;; an expectation over the text (the earlier tool's) is not used
+    (issue E (title "text only") (witness (module "m.seg") (fails "self_[.]inv") ,(client 'c1)))))
+
+(define (err text) `(error "s2/1" 10 "assertion failed" (text ,text)))
+(define original
+  `((sanity ok)
+    (client c1 failed ,(err "assert(self_.inv()); // requires of next"))
+    (client c2 failed ,(err "assert(r.wf());"))
+    (client c3 verified)))
+(define patched
+  `((sanity ok) (client c1 verified) (client c2 verified (vacuous "end/vac")) (client c3 verified)))
+
+(define dir (make-temporary-file "issues~a" 'directory))
+(define (run-dir name rs)
+  (define d (build-path dir name "results" "m.seg"))
+  (make-directory* d)
+  (write-forms (build-path d "results.rktd") rs)
+  (build-path dir name))
+(define idir (build-path dir "issues"))
+(make-directory* idir)
+(write-forms (build-path idir "a.rktd") issues-forms)
+
+(define is (read-issues idir))
+(check-equal? (map issue-id is) '(A B C D E))
+(check-equal? (issue-no-witness (list-ref is 4)) "1 witness(es) expect a text, not a clause: re-express as (requires API N) or (claim)")
+(define a (car is))
+(check-equal? (map (lambda (w) (witness-status w original)) (issue-witnesses a)) '(shows other))
+(check-equal? (map (lambda (w) (witness-status w patched)) (issue-witnesses a)) '(passes vacuous))
+(check-equal? (witness-status (car (issue-witnesses a)) '((sanity bad) (client c1 verified))) 'not-concluded)
+(check-equal? (witness-status (car (issue-witnesses a)) '((sanity ok))) 'not-run)
+(check-equal? (witness-status (car (issue-witnesses a)) `((sanity ok) (client c1 compile-error ,(err "x")))) 'broken)
+
+(check-equal? (witness-status (cadr (issue-witnesses a)) `((sanity ok) (client c2 failed ,(err "y") (vacuous "s3")))) 'vacuous)
+(check-equal? (original-status '(shows other)) 'present)
+(check-equal? (original-status '(passes passes)) 'gone)
+(check-equal? (original-status '(other broken)) 'undetected)
+(check-equal? (original-status '()) 'no-witness)
+(check-equal? (patched-status '(passes vacuous)) 'undetected)
+(check-equal? (patched-status '(shows other)) 'not-fixed)
+(check-equal? (patched-status '(other passes)) 'fixed)
+(check-equal? (original-status '(other passes)) 'gone)
+(check-equal? (patched-status '(passes)) 'fixed)
+
+(define o (run-dir "orig" original))
+(define p (run-dir "patch" patched))
+(define one (regress-report idir o))
+(check-equal? (car one) '(original (present 1) (no-witness 2) (gone 1) (undetected 1)))
+(check-not-false (member '(issue A present (shows 1) (other 1)) one))
+(check-not-false (member '(no-witness B "needs identity.rktd") one))
+(check-not-false (member '(witness A c2 (original other "assert(r.wf());")) one))
+(check-not-false (member '(issue D undetected (not-run 1)) one))
+
+(define two (regress-report idir o p))
+(check-equal? (cadr two) '(patched (undetected 2) (no-witness 2) (fixed 1)))
+(check-not-false (member '(issue A (original present (shows 1) (other 1)) (patched undetected (passes 1) (vacuous 1))) two))
+(check-not-false (member '(issue C (original gone (passes 1)) (patched fixed (passes 1))) two))
+
+;; malformed data is refused
+(define (refused forms)
+  (define f (build-path dir "bad.rktd"))
+  (write-forms f forms)
+  (check-exn exn:fail? (lambda () (read-issues f))))
+(refused '((issue X (title "no witness, no reason"))))
+(refused `((issue X (title "t") (witness (module "m") ,(client 'c)))))
+(refused `((issue X (title "t") (wtiness 1))))
+(refused '((issue X (title "a") (no-witness "r")) (issue X (title "b") (no-witness "r"))))
+
+;; a clause by its identity, however it is written (design.md 3.11)
+(define e1 `(error "s3/2" 10 "assertion failed" (text "assert(((*self_).x == 1)); // requires of m::f")))
+(check-true (error-matches? e1 '((requires m::f 2))))
+(check-false (error-matches? e1 '((requires m::f 1))))
+(check-false (error-matches? e1 '((requires m::g 2))))
+(check-true (error-matches? `(error "s4" 10 "assertion failed" (text "assert(r.ok()); // claim")) '((claim))))
+(check-false (error-matches? e1 '((claim))))
+(check-not-exn (lambda () (read-issues (let ([f (make-temporary-file)])
+                                         (write-forms f `((issue Y (title "t") (witness (module "m") (fails (requires m::f 2) "x") ,(client 'c)))))
+                                         f))))
+(refused `((issue X (title "t") (witness (module "m") (fails (requires m::f 0)) ,(client 'c)))))
+
+;; a claim's fact in its subject's positions (docs/triage.md 2)
+(define pos (hasheq 'tlb_model "#g4" 'r "#r" 'self_ "#a0"))
+(check-equal? (fact-key "(*tlb_model).inv()" pos) "#g4.inv()")
+(check-equal? (fact-key "tlb_model .inv( )" pos) "#g4.inv()")
+(check-equal? (fact-key "r is Ok" pos) "#r is Ok")
+(check-equal? (fact-key "r.rel_mutex(*self_)" pos) "#r.rel_mutex(*#a0)")   ; a call's parentheses stay
+(check-equal? (fact-key "x.self_ == r_x" pos) "x.self_==r_x")             ; fields and other names stay
+(check-false (fact-key "(*self_).va == old_self_.va" pos))                ; two states: no fact
+(define (claim-witness assert-e)
+  (witness "m" '((claim))
+           `(client w (params) (body (ghost old_t (deref t))
+                                     (do (call m::map (s f) (o t)))
+                                     (assert ,assert-e "claim")))))
+(check-equal? (witness-fact (claim-witness '(src "(*t).inv()"))) '(m::map "#g1.inv()"))
+(check-equal? (witness-fact (claim-witness '(tmpl "" (deref t) ".inv()"))) '(m::map "#g1.inv()"))
+(check-false (witness-fact (claim-witness '(src "(*t).x == old_t.x"))))
+(check-false (witness-fact (witness "m" '((requires m::map 1)) (client 'w))))
+
+;; groups: the fact labels a later call's requires, after a call of the subject
+(let* ([idir (make-temporary-file "issues~a" 'directory)]
+       [rd (build-path dir "facts")]
+       [d (build-path rd "results" "m2")])
+  (write-forms (build-path idir "i.rktd")
+               `((issue N (title "map drops tlb inv")
+                        (witness (module "m") (fails (claim))
+                                 (client w (params) (body (do (call m::map (s f) (o t))) (assert (src "(*t).inv()") "claim")))))))
+  (make-directory* d)
+  (write-forms (build-path d "results.rktd")
+               `((sanity ok)
+                 (client g failed (error "s2/1" 10 "assertion failed" (text "assert(tlb.inv()); // requires of m::map")))
+                 (client h failed (error "s2/1" 10 "assertion failed" (text "assert(tlb.inv()); // requires of m::map")))))
+  (write-forms (build-path d "plan.rktd")
+               `((client g (source "") (generics) (params) (requires)
+                         (body (call "s1" #f m::map (args (same s) (move f)) (gargs (same o) (same tlb)) (gret #f) (subst))
+                               (assert-requires "s2" m::map ((method tlb inv)))))
+                 ;; the variable in another position: not the fact
+                 (client h (source "") (generics) (params) (requires)
+                         (body (call "s1" #f m::map (args (same s) (move f)) (gargs (same tlb) (same o)) (gret #f) (subst))
+                               (assert-requires "s2" m::map ((method tlb inv)))))))
+  (define gs (filter (lambda (g) (and (pair? g) (eq? (car g) 'group))) (cddr (car (group-failures rd #f #rx"" idir)))))
+  (check-equal? (length gs) 1)
+  (check-equal? (cdr (assq 'clients (cddr (car gs)))) '(2))
+  (check-equal? (cdr (assq 'labels (cddr (car gs)))) '((issue N)))
+  (delete-directory/files idir))
+
+(delete-directory/files dir)

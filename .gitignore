@@ -1,0 +1,8 @@
+compiled/
+out/
+data/
+work/
+env.local.rktd
+env.*.rktd
+!env.rktd
+tools/item-index/target/
