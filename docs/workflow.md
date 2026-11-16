@@ -53,7 +53,7 @@
    - `(sanity ok)`才可信. `not-verified`的模块没有被验证: 读`RUN/results/<m>/verus-*.out`和`results.rktd`的`(unattributed ..)`, 查明原因 (编译错误不在client中时整个模块不被验证). 是工具的问题就改合成器 (H) 再只重跑这个模块; 不能把它当作"全部失败"汇报.
    - `(clients 0)`的模块: 没有可调用的条目, 记下.
    - `(dropped-imports ..)`, `(imports ..)`: 导入轮次的事实 (design.md 3.8), 记下.
-3. 注意: 续跑的键不含`evaluate.rkt`. 改了`evaluate.rkt`的导入轮次之后, 要重跑的模块手工删去`RUN/results/<m>/key.sha`.
+3. 续跑的键含决定结果的代码 (render.rkt, run.rkt, module-run.rkt, repair.rkt; design.md 3.8): 改了其中之一, 所有模块重跑, coverage, refute, regress随之重跑. 不必也不要手工删`key.sha`.
 
 ## D. 分组 [工具]
 
