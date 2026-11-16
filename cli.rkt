@@ -38,7 +38,10 @@
 ;;                           each group's clause added to its culprit's ensures in COPY
 ;;   racket cli.rkt confirm  RUN-DIR COPY VIR [MODULE-REGEX] [--dry]
 ;;                           provable's survivors confirmed one by one, the failed clients rerun
-;;   racket cli.rkt drops    VIR MODULE-REGEX AUTO-DIR COPY OUT-DIR [--base PATCH]
+;;   racket cli.rkt fixes    RUN-DIR COPY VIR FIXES-FILE
+;;                           hand-written fixes (exact replacements) verified together and alone,
+;;                           the target groups' modules rerun (design.md 3.9)
+;;   racket cli.rkt drops   VIR MODULE-REGEX AUTO-DIR COPY OUT-DIR [--base PATCH]
 ;;                           facts functions prove and do not export
 ;;   racket cli.rkt verdict  RUN-DIR MODULE KEY JUDGEMENT REASON FILE [--issue ID] [--any-culprit]
 ;;                           append a verdict on a group to FILE
@@ -68,7 +71,7 @@
          "lib/pipeline/scan.rkt" "lib/pipeline/check-knowledge.rkt" "lib/pipeline/evaluate.rkt"
          "lib/pipeline/groups.rkt" "lib/pipeline/refute.rkt" "lib/pipeline/provable.rkt" "lib/pipeline/confirm.rkt"
          "lib/pipeline/compare.rkt" "lib/pipeline/drops.rkt" "lib/pipeline/rename.rkt" "lib/pipeline/trusted.rkt"
-         "lib/pipeline/regress.rkt" "lib/pipeline/coverage.rkt"
+         "lib/pipeline/regress.rkt" "lib/pipeline/coverage.rkt" (only-in "lib/pipeline/fixes.rkt" fixes)
          "lib/vostd/spec-digest.rkt" "lib/base/env.rkt" "lib/pipeline/environment.rkt"
          (only-in "lib/vostd/vir.rkt" cache-vir))
 
@@ -197,6 +200,7 @@
                     (if ul (let-values ([(a b) (splitf-at m (lambda (x) (not (equal? x "--unlabelled"))))]) (append a (drop b 4))) m)))
      (void (provable dir copy (if (pair? more) (pregexp (car more)) #rx"") #:dry? (and (member "--dry" more0) #t)
                      #:unlabelled ul))]
+    [(vector "fixes" dir copy vir file) (void (fixes dir copy vir file))]
     [(vector "confirm" dir copy vir more0 ...)
      (define more (remove "--dry" more0))
      (void (confirm dir copy vir (if (pair? more) (pregexp (car more)) #rx"") #:dry? (and (member "--dry" more0) #t)))]

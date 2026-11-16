@@ -35,7 +35,7 @@
 (require racket/file racket/list racket/match racket/port racket/string racket/system racket/path
          "../analysis/drops.rkt" "../vostd/vir.rkt" "../vostd/run.rkt" "../vostd/git.rkt"
          "../base/env.rkt" "../model/api.rkt" "evaluate.rkt")
-(provide drops verify-rounds clean? restore)
+(provide drops verify-rounds clean? restore verify-ostd)
 
 (define (drops vir module-rx auto copy out #:base [base0 #f])
   (define vostd (env-ref 'vostd))

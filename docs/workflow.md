@@ -86,7 +86,8 @@
 - 问: 真实调用者需不需要这个事实? 同级的函数给了吗? 下层的给了吗?
 - 机械的事实先看: `refute`的`refuted` (client所问的在那里不成立), `provable`的`proved` (责任者有而不给), `confirm`的`confirmed`, `rests-on`.
 - 判定用`racket cli.rkt verdict RUN MODULE KEY JUDGEMENT REASON data/verdicts/round-<日期>.rktd [--issue ID]`记下. JUDGEMENT: `defect`, `not-defect`, `noise`, `by-design`, `known`, `needs-lemma`, `decision`. `decision` (要维护者决定) 和`defect`的汇报给人, 由人决定.
-- 写成"已确认的缺陷"的条件: `confirm`中`confirmed`, 或按前身evaluation.md第8节手工走完 (失败的client通过且没有新的空洞, 被改的模块0 errors, 整个ostd 0 errors, 合并补丁后再验证一次). 修改只加ensures, 循环不变式, 几行证明; 不加`assume`/`admit`/`external_body`.
+- 判为defect而`confirm`没有确认的 (没有试, 或不是`confirmed`): **[LLM]** 把修改写成数据 (`(fix ID (groups ..) (why ..) (replace FILE OLD NEW) ..)`, design.md 3.9), **[工具]** `racket cli.rkt fixes RUN COPY VIR FIXES-FILE > out/<RUN>-fixes.log`; 读`RUN/fixes/<名>/facts.rktd`: 每个修改`confirmed`与否, `bad-edit` (OLD对不上: 改写后再跑), 被去掉的 (`unproved`, `breaks-proof`, `compile`), 每个目标组前后的client数, 模块的`regressions`和新出现的组. 跑完`COPY`必须仍然干净.
+- 写成"已确认的缺陷"的条件: `confirm`或`fixes`中`confirmed`, 或按前身evaluation.md第8节手工走完 (失败的client通过且没有新的空洞, 被改的模块0 errors, 整个ostd 0 errors, 合并补丁后再验证一次). 修改只加ensures, 循环不变式, 几行证明; 不加`assume`/`admit`/`external_body`.
 - 确认了的写进`data/issues/` (格式`lib/model/issues.rkt`), 证人用`witness`取出, 期望按子句的身份.
 
 判定完再跑一次D: 新组应当都有了标签.
