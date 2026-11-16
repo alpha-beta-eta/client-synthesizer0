@@ -75,7 +75,7 @@
    racket cli.rkt provable RUN COPY --unlabelled data/auto/knowledge data/issues data/verdicts > out/<RUN>-provable.log
    ```
    `--unlabelled`只试新组 (D中没有标签的); 不加时试所有不是噪音, 没被证否的组 (要更久, 换提交之后做一次). `COPY`要与运行同一提交, 干净, 不是环境的检出 (第0节). 第一次运行把所选的组记在`RUN/provable/selection.rktd`, 续跑 (包括F写下判定之后重走本步) 试的是同样的组, 结果照旧. 它拒绝续跑的只有: 换了模式 (加上或去掉`--unlabelled`), 记下的组在运行中没有了, 候选子句变了 (运行或表变了). 那时要试新的组, 删去`RUN/provable/`和`RUN/confirm/`重跑.
-4. **确认**: `racket cli.rkt confirm RUN COPY VIR > out/<RUN>-confirm.log`. 读`RUN/confirm/facts.rktd`: 每条子句`alone`或`together-only`, `rests-on`; 每组`fixed`/`reduced`/`unchanged`, `confirmed`与否; 每个模块的`sanity`和`(new ..)`. 跑完`COPY`必须仍然干净 (`git -C COPY status --short`为空).
+4. **确认**: `racket cli.rkt confirm RUN COPY VIR > out/<RUN>-confirm.log`. 读`RUN/confirm/facts.rktd`: 每条子句`alone`, `together-only`或`breaks-caller` (子句成立, 但单独加上时使调用它的函数中原有的证明失败: 修改的代价, 不算`confirmed`), `rests-on`; 每组`fixed`/`reduced`/`unchanged`, `confirmed`与否; 每个模块的`sanity`和`(new ..)`. 跑完`COPY`必须仍然干净 (`git -C COPY status --short`为空).
 5. **回归**: `racket cli.rkt regress CFG data/issues REG > out/<REG>.log`, 然后`racket cli.rkt regress-report data/issues REG > out/<REG>-report.log`. `present`的照旧; `gone`/`undetected`的对照diff判定; `no-witness`的记下 (文本的期望要改写成`(requires API N)`或`(claim)`: `racket cli.rkt witness RUN CLIENT ..`).
 
 ## F. 判定 [LLM, 人决定]

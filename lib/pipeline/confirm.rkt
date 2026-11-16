@@ -16,7 +16,13 @@
 ;;             slot in COPY.  A clause that survives its slot is `alone`; one
 ;;             Verus blames there, `together-only` (it needs one of the
 ;;             clauses of its function or of the functions it calls: (needs
-;;             ID ...), not narrowed further)
+;;             ID ...), not narrowed further).  An error in a function with no
+;;             candidate (an existing proof: fill's loop, once write_val says
+;;             more) is put down to the slot's clauses of the functions that
+;;             function calls, for the same reason: `breaks-caller` (the
+;;             clause holds, but alone it makes a caller's proof fail; with
+;;             all of provable's clauses that proof went through).  An error
+;;             put down to no clause stops, as before
 ;;   trusted   what F's proof may rest on that Verus does not check: the
 ;;             source's `assume` and `admit` in F's body (trusted.rkt's
 ;;             sites in the body's lines), F's callees that are external_body
@@ -40,7 +46,7 @@
 ;; and
 ;;   facts.rktd
 ;;     (clause ID F ALONE (slot K) [(needs ID ...)] [(rests-on (assume FILE:LINE DETAIL) .. (external-body G) ..)] TEXT)
-;;       ALONE = alone | together-only KIND     (KIND: drops.rkt's blame)
+;;       ALONE = alone | together-only KIND | breaks-caller     (KIND: drops.rkt's blame)
 ;;     (group M KEY ID STATUS (before N) (after N) (clients N N) (at CLIENT ID AT) CONFIRMED)
 ;;       STATUS = fixed | reduced | unchanged | no-clients   (by F's clients, before/after)
 ;;       AT = fixed | fails | not-run                        (the very failure)
@@ -56,7 +62,7 @@
          "../vostd/vir.rkt" "../vostd/git.rkt" "../vostd/trusted.rkt"
          (only-in "../analysis/drops.rkt" vir-calls)
          "groups.rkt" "drops.rkt" "evaluate.rkt")
-(provide confirm slots group-status norm-path vir-facts)
+(provide confirm slots group-status norm-path vir-facts enclosing-function)
 
 ;; ================================================================ pure parts
 
@@ -118,9 +124,19 @@
   (define calls (for/hash ([(k f) (in-hash checked)])
                   (define b (field f 'body))
                   (values k (if (pair? b) (remove-duplicates (map (lambda (c) (norm-path (car c))) (vir-calls b))) '()))))
+  (define ranges (for/hash ([(k f) (in-hash checked)]) (values k (and (pair? (field f 'body)) (body-range (field f 'body))))))
   (values (lambda (f) (hash-ref calls f '()))
-          (lambda (f) (let ([x (hash-ref checked f #f)]) (and x (pair? (field x 'body)) (body-range (field x 'body)))))
-          (lambda (g) (let ([x (hash-ref checked g #f)]) (and x (eb? x))))))
+          (lambda (f) (hash-ref ranges f #f))
+          (lambda (g) (let ([x (hash-ref checked g #f)]) (and x (eb? x))))
+          ;; every function with a body: (F FILE FIRST LAST)
+          (for/list ([(k r) (in-hash ranges)] #:when r) (cons k r))))
+
+;; enclosing-function : ((F FILE FIRST LAST) ...) file line -> F or #f
+;; The innermost body that holds the line (a closure's or a nested function's
+;; inside its parent's).
+(define (enclosing-function fns file line)
+  (define in (filter (lambda (x) (and (equal? (cadr x) file) (<= (caddr x) line (cadddr x)))) fns))
+  (and (pair? in) (car (argmin (lambda (x) (- (cadddr x) (caddr x))) in))))
 
 ;; rests-on : F calls-of body-range-of trusted? sites -> ((assume FILE:LINE DETAIL) .. (external-body G) ..)
 ;; What F's proof takes on trust: the source's assume and admit in F's body,
@@ -165,7 +181,7 @@
       (match-define `(provable ,m ,key ,client ,at-id ,f ,_ ,text) x)
       (define id (for/first ([i (in-list survivors)] #:when (equal? (cand-key i) (cons (format "~a" f) text))) i))
       (list m key id f client at-id)))
-  (define-values (calls-of range-of trusted?) (vir-facts vir))
+  (define-values (calls-of range-of trusted? fns) (vir-facts vir))
   (define commit (cadr (assq 'commit (cdr (file->value (build-path run-dir "manifest.rktd"))))))
   (define sites (trusted-sites copy commit))
   (define (rests f) (rests-on f calls-of range-of trusted? sites))
@@ -197,10 +213,10 @@
      (define target (or (env-ref 'drops-target-dir #f) (string-append (env-ref 'target-dir) "-drops")))
      (dynamic-wind
       void
-      (lambda () (run-confirm run-dir copy out o cands survivors sl proved-groups rerun modules calls-of rests target last-verified))
+      (lambda () (run-confirm run-dir copy out o cands survivors sl proved-groups rerun modules calls-of rests target last-verified fns))
       (lambda () (restore copy)))]))
 
-(define (run-confirm run-dir copy out o cands survivors sl proved-groups rerun modules calls-of rests target last-verified)
+(define (run-confirm run-dir copy out o cands survivors sl proved-groups rerun modules calls-of rests target last-verified fns)
   (define (cand-f i) (norm-path (cadr (list-ref cands i))))
   ;; ---------------------------------------------------------------- alone
   (define alone ; id -> 'alone or (together-only KIND)
@@ -216,12 +232,23 @@
       (unless (or (file-exists? (build-path dir "rounds.rktd")) (clean? copy))
         (error 'confirm "~a has changes in ostd/: give a clean copy" copy))
       (printf "slot ~a: ~a clauses\n" k (length s))
-      (define rounds (verify-rounds copy cs dir (lambda () (restore copy))))
+      ;; an error in a function that is no candidate's: the slot's clauses of the
+      ;; functions it calls (slots keep related clauses apart for the same reason)
+      (define (callers e)
+        (define f (and (list-ref e 1) (list-ref e 2) (enclosing-function fns (list-ref e 1) (list-ref e 2))))
+        (if f
+            (for/list ([j (in-range (length s))] #:when (member (cand-f (list-ref s j)) (calls-of f))) j)
+            '()))
+      (define rounds (verify-rounds copy cs dir (lambda () (restore copy)) #:callers callers))
       (define bl (for*/hash ([r (in-list rounds)] #:when (eq? (car r) 'round)
                              [b (in-list (cddddr r))] [j (in-list (cdr b))])
                    (values (list-ref s j) (car b))))
       (for/fold ([h h]) ([i (in-list s)])
-        (hash-set h i (cond [(hash-ref bl i #f) => (lambda (kind) (list 'together-only kind))] [else 'alone])))))
+        (hash-set h i (match (hash-ref bl i #f)
+                        [#f 'alone]
+                        ;; the clause holds, but alone it makes a caller's existing proof fail
+                        ['breaks-caller '(breaks-caller)]
+                        [kind (list 'together-only kind)])))))
   ;; ---------------------------------------------------------------- clients
   (restore copy)
   (define patch (path->string (simplify-path (path->complete-path (build-path run-dir "provable" "survivors.patch")))))
@@ -276,7 +303,7 @@
     (for/list ([i (in-list survivors)])
       (define f (cand-f i))
       (define a (hash-ref alone i))
-      (define needs (if (eq? a 'alone) '()
+      (define needs (if (or (eq? a 'alone) (equal? a '(breaks-caller))) '()
                         (for/list ([j (in-list survivors)]
                                    #:unless (= j i)
                                    #:when (or (equal? (cand-f j) f) (member (cand-f j) (calls-of f))))
@@ -315,7 +342,7 @@
   (define (tally xs sel) (for/fold ([h (hash)]) ([x (in-list xs)]) (hash-update h (sel x) add1 0)))
   (define (show h) (string-join (for/list ([(k n) (in-hash h)]) (format "~a ~a" k n)) ", "))
   (printf "ostd with all of them: ~a verified, ~a errors (provable's last round)\n" (car last-verified) (cadr last-verified))
-  (printf "clauses: ~a\n" (show (tally clause-facts (lambda (x) (if (eq? (cadddr x) 'alone) 'alone 'together-only)))))
+  (printf "clauses: ~a\n" (show (tally clause-facts (lambda (x) (cadddr x)))))
   (printf "clauses resting on trusted code: ~a\n" (count (lambda (x) (findf (lambda (y) (and (pair? y) (eq? (car y) 'rests-on))) x)) clause-facts))
   (printf "groups: ~a; ~a\n" (show (tally group-facts (lambda (x) (list-ref x 4))))
           (show (tally group-facts last)))
