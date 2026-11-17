@@ -127,3 +127,10 @@
 (check-equal? (with-deps 'L wfns wcalls '(U L D O)) '(D))
 (check-equal? (with-deps 'O wfns wcalls '(U L D)) '())
 (check-true (fix-confirmed? '(with L D) '(("mm.io" "k1" 3 0))))
+
+;; the frozen base: an error on a line of a base fix's new text is not the base's (not in IDS);
+;; it goes by its function to the new fixes that reach it, or stays unblamed
+(let-values ([(b u) (blame-fix-errors (list (err "assertion failed" "a.rs" 3)) spans-of fn-at reaches? edited '(R2) #t)])
+  (check-equal? b '()) (check-equal? (length u) 1))
+(let-values ([(b u) (blame-fix-errors (list (err "assertion failed" "a.rs" 3)) spans-of fn-at (lambda (g f) #t) edited '(R2) #t)])
+  (check-equal? b '((breaks-proof R2))) (check-equal? u '()))

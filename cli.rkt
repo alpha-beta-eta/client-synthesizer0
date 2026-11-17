@@ -200,7 +200,10 @@
                     (if ul (let-values ([(a b) (splitf-at m (lambda (x) (not (equal? x "--unlabelled"))))]) (append a (drop b 4))) m)))
      (void (provable dir copy (if (pair? more) (pregexp (car more)) #rx"") #:dry? (and (member "--dry" more0) #t)
                      #:unlabelled ul))]
-    [(vector "fixes" dir copy vir file) (void (fixes dir copy vir file))]
+    [(vector "fixes" dir copy vir file more ...)
+     ;; --base FILE: confirmed fixes, frozen; --base-run DIR: the run with exactly the base (design.md 3.9)
+     (define (opt name) (match (member name more) [(list* _ v _) v] [_ #f]))
+     (void (fixes dir copy vir file #:base (opt "--base") #:base-run (opt "--base-run")))]
     [(vector "confirm" dir copy vir more0 ...)
      (define more (remove "--dry" more0))
      (void (confirm dir copy vir (if (pair? more) (pregexp (car more)) #rx"") #:dry? (and (member "--dry" more0) #t)))]
