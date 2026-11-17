@@ -115,3 +115,11 @@
 (check-false (fix-confirmed? 'alone '(("mm.frame" "k2" 2 not-run))))
 (check-false (fix-confirmed? '(not-alone breaks-proof) '(("mm.io" "k1" 3 0))))
 (check-false (fix-confirmed? 'alone '()))
+
+;; with: the fixes on functions a fix's functions call (directly or not), not its own, not others
+(define (wfns id) (case id [(U) '("m::upper")] [(L) '("m::lower")] [(D) '("m::deep")] [(O) '("m::other")] [(S) '("m::upper")] [else '()]))
+(define (wcalls f) (case f [("m::upper") '("m::lower")] [("m::lower") '("m::deep")] [else '()]))
+(check-equal? (with-deps 'U wfns wcalls '(U L D O S)) '(L D))
+(check-equal? (with-deps 'L wfns wcalls '(U L D O)) '(D))
+(check-equal? (with-deps 'O wfns wcalls '(U L D)) '())
+(check-true (fix-confirmed? '(with L D) '(("mm.io" "k1" 3 0))))

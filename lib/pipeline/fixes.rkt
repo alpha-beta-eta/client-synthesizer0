@@ -25,6 +25,8 @@
 ;;             error; an error put down to no fix stops.
 ;;   alone     the survivors in slots (no two related fixes in one), each slot
 ;;             verified the same way: a fix blamed in its slot is not `alone`.
+;;   with      a fix unproved alone, verified again with the fixes that hold
+;;             alone on the functions its functions call: `(with ID ..)`.
 ;;   clients   the survivors applied, COPY as the checkout, the target groups'
 ;;             modules run again (evaluate.rkt, a configuration of those
 ;;             modules), grouped, compared with the run client by client.
@@ -34,14 +36,14 @@
 ;; directory), and facts.rktd:
 ;;   (fix ID STATUS [ALONE] (groups (M KEY BEFORE AFTER) ...) CONFIRMED)
 ;;     STATUS = kept | bad-edit REASON | removed KIND ROUND
-;;     ALONE = alone | not-alone KIND    CONFIRMED = confirmed | not-confirmed
+;;     ALONE = alone | (with ID ..) | not-alone KIND    CONFIRMED = confirmed | not-confirmed
 ;;   (module M (verified BEFORE AFTER) (sanity S) (regressions NAME ...) (new KEY ...))
 ;; Resumed: the rounds from rounds.rktd, a slot from its own, the clients by
 ;; evaluate's key.  COPY must be clean; it is restored at the end.
 (require racket/file racket/list racket/match racket/string racket/path racket/pretty file/sha1
          "../base/forms.rkt" "../base/env.rkt" "../vostd/run.rkt" "../vostd/git.rkt"
          "drops.rkt" "confirm.rkt" "evaluate.rkt" "groups.rkt" "compare.rkt")
-(provide fixes read-fixes read-no-fixes ostd-results retry-ids group-fact fix-confirmed? plan-edits map-line blame-fix-errors fix-slots norm-file function-at)
+(provide fixes read-fixes read-no-fixes ostd-results with-deps retry-ids group-fact fix-confirmed? plan-edits map-line blame-fix-errors fix-slots norm-file function-at)
 
 ;; ================================================================ data
 
@@ -292,9 +294,24 @@
   (list m key (hash-ref (hash-ref before m (hash)) key 0)
         (if (member m ms) (hash-ref (hash-ref after m (hash)) key 0) 'not-run)))
 
-;; fix-confirmed? : alone (group-fact ...) -> alone, and every group at 0 after
+;; fix-confirmed? : alone (group-fact ...) -> alone (or with fixes that are), and every group at 0 after
 (define (fix-confirmed? a gs)
-  (and (eq? a 'alone) (pair? gs) (andmap (lambda (g) (eqv? 0 (list-ref g 3))) gs)))
+  (and (or (eq? a 'alone) (and (pair? a) (eq? (car a) 'with))) (pair? gs) (andmap (lambda (g) (eqv? 0 (list-ref g 3))) gs)))
+
+;; with-deps : id edited-fns calls-of (id ...) -> (id ...)
+;; The fixes among CANDIDATES that edit a function the fix's functions call, directly or not:
+;; what a fix unproved alone may rest on (design.md 3.9, `with`).
+(define (with-deps id edited-fns calls-of candidates)
+  (define reach
+    (let loop ([todo (edited-fns id)] [seen (hash)])
+      (cond [(null? todo) seen]
+            [(hash-ref seen (car todo) #f) (loop (cdr todo) seen)]
+            [else (loop (append (calls-of (car todo)) (cdr todo)) (hash-set seen (car todo) #t))])))
+  (define own (edited-fns id))
+  (for/list ([c (in-list candidates)]
+             #:unless (eqv? c id)
+             #:when (for/or ([f (in-list (edited-fns c))]) (and (hash-ref reach f #f) (not (member f own)))))
+    c))
 
 ;; a configuration of the run's, its modules only these
 (define (module-config run-dir ms file)
@@ -366,13 +383,25 @@
      ;; alone (a slot's directory named by its fixes: another set, another directory)
      (define sl (fix-slots (map fix-id survivors) edited-fns reach?))
      (printf "alone: ~a slots (~a)\n" (length sl) (string-join (map (lambda (s) (number->string (length s))) sl) " "))
-     (define alone
+     (define alone0
        (for/fold ([h (hash)]) ([s (in-list sl)] [k (in-naturals 1)])
          (define sfs (filter (lambda (f) (memv (fix-id f) s)) survivors))
          (printf "slot ~a:\n" k)
          (define sdir (o (format "alone-~a" (substring (sha1 (open-input-string (format "~s" (sort (map (lambda (x) (format "~a" x)) s) string<?)))) 0 12))))
          (define r (removed-in (rounds copy sfs sdir fn-at reach? edited-fns target)))
          (for/fold ([h h]) ([id (in-list s)]) (hash-set h id (match (hash-ref r id #f) [#f 'alone] [(list kind _) (list 'not-alone kind)])))))
+     ;; with: a fix unproved alone, again with the fixes that hold alone on the functions it calls
+     (define alone-ids (for/list ([f (in-list survivors)] #:when (eq? (hash-ref alone0 (fix-id f) #f) 'alone)) (fix-id f)))
+     (define alone
+       (for/fold ([h alone0]) ([f (in-list survivors)] #:when (equal? (hash-ref alone0 (fix-id f) #f) '(not-alone unproved)))
+         (define id (fix-id f))
+         (define deps (with-deps id edited-fns calls-of alone-ids))
+         (cond
+           [(null? deps) h]
+           [else
+            (define ok (verify-set copy (cons f (filter (lambda (x) (memv (fix-id x) deps)) survivors)) (o (format "with-~a" id)) target text-of))
+            (printf "  with ~a (~a): ~a\n" id (string-join (map (lambda (d) (format "~a" d)) deps) " ") (if ok "verifies" "fails"))
+            (if ok (hash-set h id `(with ,@deps)) h)])))
      ;; clients: the survivors applied, the target modules rerun with COPY as the checkout
      (restore-all copy)
      (define-values (files _b) (plan-edits text-of survivors))
