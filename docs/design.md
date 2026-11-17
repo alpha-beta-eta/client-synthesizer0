@@ -232,7 +232,7 @@ client的失败指出requires的缺口; 反过来的问题是**哪些ensures子�
 - **空洞有两种:** 假定矛盾 (client的requires, 表的requires, 之前失败的断言), 这时路径上的结论无效; 或者路径经过规格排除了的分支 (Err之后再调用得到Some), 这时它是一个事实. else分支的组合尤其常见后者.
 - **空洞性断言只在路径末尾.** 一个分支的末尾另加断言不行: 失败的`assert(false)`之后一切都空洞.
 - **`(sanity ok)`才可信.** 没有`verification results`一行, 或sanity不恰好失败一次, 这个模块没有真的被验证.
-- **`cargo dv verify`也一样**: 源码与上一次在同一目标目录中验证过的相同时, 它只打印`Verified ostd .. in 0.59s`, 没有`verification results`一行. `drops`/`fixes`的每次验证之前先更新`ostd/src/lib.rs`的修改时间, 让它真的重新验证 (r1: 第七次的108个修改原样再跑, 第一轮就因为没有结果而停下; 2026-11-17).
+- **`cargo dv verify`也一样**: 源码与上一次在同一目标目录中验证过的相同时, 它只打印`Verified ostd .. in 0.59s`, 没有`verification results`一行. 它按内容判断, 不按修改时间: `drops`/`fixes`的每次验证之前在`ostd/src/lib.rs`末尾加一行带时间的注释 (不移动任何行), 验证完写回原文, 让它真的重新验证 (r1: 第七次的108个修改原样再跑, 第一轮就因为没有结果而停下; 2026-11-17).
 - **`cargo dv focus`在源码没有变化时直接给出上一次的结果**, 即使`--verify-only-module`不同; 要改动一个文件才会重新验证. 先看输出中"verifying module"是不是要验证的那个.
 - **Verus会崩溃** (求解器panic, 内存耗尽). 崩溃的输出中没有完整的结果, 不能当作编译错误处理, 也不能保留其中的部分结果; 对半拆开重跑只是后备. 以前大模块的崩溃来自下一条所说的长z3会话, 不是client的个数本身.
 - **Verus给一个模块一个z3会话.** client都在一个模块中, 不加属性时整个模块在一个z3中**串行**验证 (32核的机器上只有一个z3在跑), 而且这个z3一直累积: cursor模块155个一批在约18分钟后崩溃 ("expected rlimit-count in smt statistics"), 对半拆了7次, 整个模块用了3.5小时. 所以每个client带`#[verifier::spinoff_prover]` (render.rkt): 各自一个新的z3, 按线程并行. 同样的619个client一批11分钟, 不崩溃, 每个client的状态不变 (只有rlimit与被它挡住的`may_panic`断言不同); segment从354秒到66秒. 每个client的结果也不再取决于同批的别的client (rlimit的结果原来取决于共享的z3的状态).

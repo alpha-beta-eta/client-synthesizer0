@@ -238,17 +238,22 @@
 ;; cargo dv verify --package ostd in copy, with the project's Verus
 (define (verify-ostd copy target log)
   (define cargo (or (find-executable-path "cargo.exe") (find-executable-path "cargo") (error 'drops "cargo not found")))
-  ;; cargo-verus reports nothing for sources it has verified before in TARGET (design.md 4.1):
-  ;; a newer lib.rs makes it verify again
-  (let ([lib (build-path copy "ostd" "src" "lib.rs")])
-    (when (file-exists? lib) (file-or-directory-modify-seconds lib (current-seconds))))
+  ;; cargo-verus reports nothing for sources it has verified before in TARGET (design.md 4.1),
+  ;; judged by their content: a comment at the end of lib.rs (no line moves) makes it verify
+  ;; again; lib.rs is written back afterwards
+  (define lib (build-path copy "ostd" "src" "lib.rs"))
+  (define lib0 (and (file-exists? lib) (file->string lib)))
+  (when lib0
+    (call-with-output-file lib #:exists 'truncate
+      (lambda (o) (write-string lib0 o) (fprintf o "\n// client-synthesizer0 run ~a\n" (current-inexact-milliseconds)))))
   (define e (verus-environment (current-environment-variables)))
   (environment-variables-set! e #"CARGO_TARGET_DIR" (string->bytes/utf-8 target))
   (call-with-output-file log #:exists 'truncate
     (lambda (p)
       (parameterize ([current-directory copy] [current-environment-variables e]
                      [current-output-port p] [current-error-port p])
-        (system* cargo "dv" "verify" "--package" "ostd")))))
+        (system* cargo "dv" "verify" "--package" "ostd"))))
+  (when lib0 (call-with-output-file lib #:exists 'truncate (lambda (o) (write-string lib0 o)))))
 
 ;; vir-path -> (module . fn), from the tables in dir
 (define (table-fns dir)
