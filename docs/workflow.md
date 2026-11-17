@@ -78,19 +78,56 @@
 4. **确认**: `racket cli.rkt confirm RUN COPY VIR > out/<RUN>-confirm.log`. 读`RUN/confirm/facts.rktd`: 每条子句`alone`, `together-only`或`breaks-proof` (子句成立, 但单独加上时使调用它的函数或同一模块中原有的证明失败: 修改的代价, 不算`confirmed`), `rests-on`; 每组`fixed`/`reduced`/`unchanged`, `confirmed`与否; 每个模块的`sanity`和`(new ..)`. 跑完`COPY`必须仍然干净 (`git -C COPY status --short`为空).
 5. **回归**: `racket cli.rkt regress CFG data/issues REG > out/<REG>.log`, 然后`racket cli.rkt regress-report data/issues REG > out/<REG>-report.log`. `present`的照旧; `gone`/`undetected`的对照diff判定; `no-witness`的记下 (文本的期望要改写成`(requires API N)`或`(claim)`: `racket cli.rkt witness RUN CLIENT ..`).
 
-## F. 判定 [LLM, 人决定]
+## F. 判定与确认 [LLM, 工具, 人决定]
+
+**一次审阅到底, 再写修改; `fixes`跑一次, 修补一次.** 不在中途回头审, 不为了审得更细再跑`fixes` (2026-11-17的r1: 分几波审, 每波都要再写修改再跑, `fixes`跑了7次, 其中3次是撤回). F1做完之前不写修改; F4之后仍没有确认的, 记为`decision`并写明原因, 不再跑第三次.
+
+**F1. 判定 [LLM]: 每组, 并核对组里的每个client.**
+
+```bash
+racket cli.rkt groups RUN data/auto/knowledge data/issues --verdicts data/verdicts --members > out/<RUN>-groups-members.log
+```
 
 对D中的每个新组 (先`(proves ..)`的组), 按前身evaluation.md 7.3判定, 写一句理由:
 
 - 读被调用者的规格, 必要时读函数体和上游的实现; 先查已知问题和已有的判定中是否已处理过同一函数.
 - 问: 真实调用者需不需要这个事实? 同级的函数给了吗? 下层的给了吗?
 - 机械的事实先看: `refute`的`refuted` (client所问的在那里不成立), `provable`的`proved` (责任者有而不给), `confirm`的`confirmed`, `rests-on`.
-- 判定用`racket cli.rkt verdict RUN MODULE KEY JUDGEMENT REASON data/verdicts/round-<日期>.rktd [--issue ID]`记下. JUDGEMENT: `defect`, `not-defect`, `noise`, `by-design`, `known`, `needs-lemma`, `decision`. `decision` (要维护者决定) 和`defect`的汇报给人, 由人决定.
-- 判为defect而`confirm`没有确认的 (没有试, 或不是`confirmed`): **[LLM]** 把修改写成数据 (`(fix ID (groups ..) (why ..) (replace FILE OLD NEW) ..)`, design.md 3.9), **[工具]** `racket cli.rkt fixes RUN COPY VIR FIXES-FILE > out/<RUN>-fixes.log`; 读`RUN/fixes/<名>/facts.rktd`: 每个修改`confirmed`与否, `bad-edit` (OLD对不上: 改写后再跑), 被去掉的 (`unproved`, `breaks-proof`, `compile`), 每个目标组前后的client数, 模块的`regressions`和新出现的组. 跑完`COPY`必须仍然干净.
-- 写成"已确认的缺陷"的条件: `confirm`或`fixes`中`confirmed`, 或按前身evaluation.md第8节手工走完 (失败的client通过且没有新的空洞, 被改的模块0 errors, 整个ostd 0 errors, 合并补丁后再验证一次). 修改只加ensures, 循环不变式, 几行证明; 不加`assume`/`admit`/`external_body`.
-- 确认了的写进`data/issues/` (格式`lib/model/issues.rkt`), 证人用`witness`取出, 期望按子句的身份.
+- **然后读`(members ..)`中的每个client**: 理由能解释它自己的失败吗 (缺的是同一个事实, 或是同一个client的错)? 组按第一个失败的子句分, 同一子句的client可能因不同的事实失败 (真实的调用者在一个`noise`组里, 一个缺自己requires的client在一个`defect`组里). 组的判定按多数; 原因不同的client逐个写进`out/<RUN>-f/clients.rktd`: `(client MODULE NAME JUDGEMENT "KEY" "REASON")`. 编译错误的client和空洞地通过的client (`results.rktd`中的`(vacuous ..)`) 也在这里判.
+- 用`racket cli.rkt verdict RUN MODULE KEY JUDGEMENT REASON data/verdicts/round-<日期>.rktd [--issue ID]`记下组的判定. JUDGEMENT: `defect`, `not-defect`, `noise`, `by-design`, `known`, `needs-lemma`, `decision`. 不是`defect`也不是`decision`的现在就记下; `defect`的 (组或client) 进F2; `decision`的汇总到F5.
+- 判定很多时分给几个子代理 (按领域, 每个子代理的组和它们的全部client一起给它); 机械的核对 (理由与client是否一致) 可以用便宜的模型.
 
-判定完再跑一次D: 新组应当都有了标签.
+**F2. 写修改 [LLM]: 所有defect候选, 一次.** 组的和client的, 每个写成数据 (`(fix ID (groups ..) (why ..) (replace FILE OLD NEW) ..)`, design.md 3.9); client的写它失败的子句的组键. 规则:
+
+- 只改规格: 加ensures, 循环不变式, 几行证明; 不加`assume`/`admit`/`external_body`; 不给`external_body`函数加ensures, **也不改`external_body`函数的契约所用的open spec函数** (那是不经证明地加强可信的契约, r1的R50).
+- **不替换基线中的修改** (基线: 以前确认了的修改, 见F3); 要在同一处多给事实, 另写一个修改, 编辑不与基线的重叠.
+- 每个领域一个文件, 合起来一个`FIXES-FILE`; 先检查OLD恰好出现一次, 不重叠 (`plan-edits`), 每个候选都在某个修改或`(no-fix (M KEY) WHY)`中.
+
+**F3. 确认 [工具]: `fixes`一次.**
+
+```bash
+racket cli.rkt fixes RUN COPY VIR FIXES-FILE --base BASE --base-run BASE-RUN > out/<RUN>-fixes.log
+```
+
+`BASE`是已确认的修改 (上一轮或本轮之前的`fixes-base`的输出, 修改的数据), 冻结: 每次验证都先打上, 不分槽, 不被归错, 不被替换; `BASE-RUN`是只打了基线的那次重跑 (上一次的`RUN/fixes/<名>/after`). 第一次没有基线时省去这两个选项. 读`RUN/fixes/<名>/facts.rktd`: 每个修改`confirmed`与否 (单独或`with`成立, 目标组都降到0), `bad-edit` (OLD对不上), 被去掉的 (`unproved`, `breaks-proof`, `compile`, `other`), 每个目标组前后的client数 (只数这组原来的client, 改为超时的算没有清除), 模块的`regressions`和新出现的组. client逐个看: `out/<RUN>-f/clients.rktd`中的每个defect client在`after/results`中通过了没有. 跑完`COPY`必须仍然干净.
+
+**F4. 修补 [LLM, 工具]: 一次.** 只对F3中被去掉的, 证不出的, 留下而组没有清除的: 读它们的错误 (`RUN/fixes/<名>/verus-rN.out`, `alone-*/`, `after/results`), 写新的修改 (新的ID, 不替换), 以F3留下且成立的为新的基线再跑一次:
+
+```bash
+racket cli.rkt fixes-base RUN/fixes/<F3的名>/facts.rktd FIXES-FILE BASE > out/<RUN>-f/base2.rktd
+```
+```bash
+racket cli.rkt fixes RUN COPY VIR FIXES-FILE-2 --base out/<RUN>-f/base2.rktd --base-run RUN/fixes/<F3的名>/after > out/<RUN>-fixes2.log
+```
+
+F4之后仍没有确认的, 记为`decision`, 理由写明 (修改证不出, 组仍有几个client失败及其原因, 没有只改规格的修改).
+
+**F5. 记录, 一次问人 [工具, 人决定].**
+
+- 写成"已确认的缺陷"的条件: `confirm`或`fixes`中`confirmed`, 或按前身evaluation.md第8节手工走完 (失败的client通过且没有新的空洞, 被改的模块0 errors, 整个ostd 0 errors, 合并补丁后再验证一次).
+- 确认了的写进`data/issues/` (格式`lib/model/issues.rkt`), 证人用`witness`取出, 期望按子句的身份; 组的判定记为`defect --issue ID`. 下一轮的基线: `fixes-base`的输出.
+- `defect`和`decision`汇报给人, 由人决定; 记下之前停下来问 (SKILL.md第4条).
+- 记完再跑一次D: 新组应当都有了标签; 再跑E5的回归: 新的问题都应`present`.
 
 ## G. 可信代码 [工具, LLM审计, 人决定]
 
@@ -118,3 +155,4 @@
 - 只凭阅读把修改写成"已确认".
 - 在用户的vostd工作区中改动; 两个改写检出的步骤同时跑.
 - 拿上一次的中间结果当作已知正确; 只看汇总数字.
+- F1没做完就写修改; 为了审得更细再跑`fixes`; 替换基线中已确认的修改; F4之后再跑第三次`fixes`.
