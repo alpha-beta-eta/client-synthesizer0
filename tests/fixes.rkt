@@ -141,3 +141,11 @@
                             (module "m" (verified 1 2)))
                           '((fix D (groups)) (fix C (groups)) (fix B (groups)) (fix A (groups)) (no-fix ("m" "k") "w")))
               '((fix B (groups)) (fix A (groups))))
+
+;; a fix's flags: what its new text adds that is no specification
+(check-equal? (fix-attributes (fix* 'R10 '("a.rs" "fn up(self)" "#[verifier::loop_isolation(false)]\nfn up(self)")
+                                    '("a.rs" "ensures x," "ensures x, y,")))
+              '("#[verifier::loop_isolation(false)]"))
+(check-equal? (fix-attributes (fix* 'R11 '("a.rs" "{ body }" "{ assume(p); body }"))) '("assume("))
+;; an attribute already in OLD is not added by the fix
+(check-equal? (fix-attributes (fix* 'R12 '("a.rs" "#[verifier::rlimit(200)]\nfn f()" "#[verifier::rlimit(200)]\nfn f() ensures r,"))) '())

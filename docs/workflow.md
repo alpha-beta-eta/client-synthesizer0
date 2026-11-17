@@ -125,8 +125,8 @@ F4之后仍没有确认的, 记为`decision`, 理由写明 (修改证不出, 组
 **F5. 记录, 一次问人 [工具, 人决定].**
 
 - 写成"已确认的缺陷"的条件: `confirm`或`fixes`中`confirmed`, 或按前身evaluation.md第8节手工走完 (失败的client通过且没有新的空洞, 被改的模块0 errors, 整个ostd 0 errors, 合并补丁后再验证一次).
-- 确认了的写进`data/issues/` (格式`lib/model/issues.rkt`), 证人用`witness`取出, 期望按子句的身份; 组的判定记为`defect --issue ID`. 下一轮的基线: `fixes-base`的输出.
-- `defect`和`decision`汇报给人, 由人决定; 记下之前停下来问 (SKILL.md第4条).
+- **直接记下, 不问** (2026-11-17用户定): `fixes`中`confirmed`的修改所确认的组 (单独或`with`成立, 组原来的client都通过或在别处失败, 超时的不算), 且修改**没有标记**: 事实中的`(rests-on ..)`没有`assume`/`admit`, `(attributes ..)`为空, 写修改和判定的人都没有指出它改了`external_body`函数的契约所用的open spec函数 (R50那类), 与已有的判定不冲突 (同一原因的client没有被判为`by-design`/`not-defect`). 写进`data/issues/` (格式`lib/model/issues.rkt`), 证人用`witness`取出, 期望按子句的身份; 组的判定记为`defect --issue ID`. 下一轮的基线: `fixes-base`的输出.
+- **汇总后一次问人**: `decision`; 带标记的`defect` (列出标记: 依靠的`assume`的位置, 属性, 改的open spec函数); 判定之间的冲突; 标为**[人]**的. 先不记; 人定了再记. 只调用`external_body`函数的不算标记, 列在记录中.
 - 记完再跑一次D: 新组应当都有了标签; 再跑E5的回归: 新的问题都应`present`.
 
 ## G. 可信代码 [工具, LLM审计, 人决定]

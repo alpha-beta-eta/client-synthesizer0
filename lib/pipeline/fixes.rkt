@@ -47,8 +47,9 @@
 ;; evaluate's key.  COPY must be clean; it is restored at the end.
 (require racket/file racket/list racket/match racket/string racket/path racket/pretty file/sha1
          "../base/forms.rkt" "../base/env.rkt" "../vostd/run.rkt" "../vostd/git.rkt"
-         "drops.rkt" "confirm.rkt" "evaluate.rkt" "groups.rkt" "compare.rkt")
-(provide fixes fixes-base base-forms read-fixes read-no-fixes ostd-results with-deps retry-ids group-fact fix-confirmed? plan-edits map-line blame-fix-errors fix-slots norm-file function-at)
+         "drops.rkt" "confirm.rkt" "evaluate.rkt" "groups.rkt" "compare.rkt"
+         (only-in "../vostd/trusted.rkt" trusted-sites))
+(provide fixes fixes-base base-forms fix-attributes read-fixes read-no-fixes ostd-results with-deps retry-ids group-fact fix-confirmed? plan-edits map-line blame-fix-errors fix-slots norm-file function-at)
 
 ;; ================================================================ data
 
@@ -213,6 +214,16 @@
       (cond [(null? after) (append (reverse before) (list (list id)))]
             [(ormap (lambda (x) (rel? x id)) (car after)) (loop (cons (car after) before) (cdr after))]
             [else (append (reverse before) (list (cons id (car after))) (cdr after))]))))
+
+;; fix-attributes : fix -> (STRING ...), what its new text adds that is no specification:
+;; `#[verifier::..]` attributes, `assume`/`admit` (design.md 3.9, the fix's flags)
+(define (fix-attributes f)
+  (remove-duplicates
+   (for*/list ([e (in-list (fix-edits f))]
+               [new (in-value (caddr e))] [old (in-value (cadr e))]
+               [m (in-list (regexp-match* #px"#!?\\[verifier::[^\\]]*\\]|\\b(?:assume|admit)\\s*\\(" new))]
+               #:unless (regexp-match? (regexp (regexp-quote m)) old))
+     m)))
 
 ;; base-forms : facts (fix form ...) -> (fix form ...)
 ;; The forms of the fixes that held: kept, and alone or with fixes that are (design.md 3.9);
@@ -407,6 +418,10 @@
       (define f (fn-at file (cadr sp)))
       (if f (hash-update h (car sp) (lambda (l) (remove-duplicates (cons f l))) '()) h)))
   (define (edited-fns id) (hash-ref edited id '()))
+  ;; what each fix's functions take on trust (confirm.rkt's rests-on)
+  (define sites (trusted-sites copy commit))
+  (define (rests-of id)
+    (remove-duplicates (append* (for/list ([g (in-list (edited-fns id))]) (rests-on g calls-of range-of trusted? sites)))))
   (define good (filter (lambda (f) (not (assv (fix-id f) bad))) fs))
   (printf "~a fixes, ~a bad-edit\n" (length fs) (length bad))
   (for ([b (in-list bad)]) (printf "  bad-edit ~a: ~a\n" (car b) (cdr b)))
@@ -493,6 +508,7 @@
                           [else '(kept)]))
          (define a (hash-ref alone id #f))
          `(fix ,id ,@st ,@(if a (list a) '()) (groups ,@gs)
+               (rests-on ,@(rests-of id)) (attributes ,@(fix-attributes f))
                ,(if (fix-confirmed? a gs) 'confirmed 'not-confirmed))))
      (define module-facts
        (for/list ([m (in-list ms)])
