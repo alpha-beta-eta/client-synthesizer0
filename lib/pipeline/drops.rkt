@@ -238,6 +238,10 @@
 ;; cargo dv verify --package ostd in copy, with the project's Verus
 (define (verify-ostd copy target log)
   (define cargo (or (find-executable-path "cargo.exe") (find-executable-path "cargo") (error 'drops "cargo not found")))
+  ;; cargo-verus reports nothing for sources it has verified before in TARGET (design.md 4.1):
+  ;; a newer lib.rs makes it verify again
+  (let ([lib (build-path copy "ostd" "src" "lib.rs")])
+    (when (file-exists? lib) (file-or-directory-modify-seconds lib (current-seconds))))
   (define e (verus-environment (current-environment-variables)))
   (environment-variables-set! e #"CARGO_TARGET_DIR" (string->bytes/utf-8 target))
   (call-with-output-file log #:exists 'truncate
