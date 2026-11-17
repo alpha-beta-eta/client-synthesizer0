@@ -162,7 +162,7 @@ LLM从注释, 真实调用者 (vostd的调用点, 保留的ktest, Asterinas的�
 - 运行: 只验证client模块. 解析每个错误, 按行映射归到语句; 编译错误归不到时按错误中第一个落在client中的位置归因.
 - 导入: client还会用到别的模块的类型 (协议调用别的模块的API, 签名中提到本模块没有导入的trait). 在client的位置能看见什么只有rustc知道 (私有模块的路径不能用, 别的模块私有的`use`带不过来), 所以不由VIR的路径拼导入: 一个模块跑完后, 编译错误中只有一个候选的导入建议 (规则同表的机械修补) 加进本次运行的表, 整个模块重跑, 通过的不减少才采用. 要重复几轮 (至多3轮): rustc分阶段报错, 先是找不到的名字 (`SpinGuardian`), 名字都解析了才报方法 (`deref`所属的trait不在作用域中), 所以下一阶段的建议要等一轮之后才出现 (只做一轮时, `rwarc`的4个协议client停在`deref`上). 整模块重跑, 因为一行显式的导入会遮蔽glob导入的同名项, 可能改变别的client. 原型另试过一种做法: 读别的模块源码顶层的`use`, 取签名中用到的名字的那些 (连同glob和`#[cfg]`), 改成绝对路径. 它能用, 但要自己解析Rust的路径 (`super::`, `self::`, `mod.rs`中指子模块的相对路径, 被`cfg`关掉的), 全取又会碰上别处的私有导入 (E0603) 和同名的冲突 (E0252); 由rustc的建议导入不必知道这些, 所以不采用.
 - 经过client模块本身的导入建议 (`use crate::mm::page_table::cs_clients::array_ptr::ArrayPtr;`: client模块`use`了一个模块时, rustc会经它建议) 只在那个模块中成立, 而表也从别的模块用 (一次因此整个cursor模块编译不过): 改写为经client自己的那条导入 (`use vstd_extra::array_ptr::ArrayPtr;`), 没有那条导入就不采用.
-- 续跑: 一个模块的结果只在client, 表的导入, 对表展开后的client (client.rkt的展开: 断言和提升的requires), 渲染和运行的代码 (render.rkt, run.rkt的哈希), 检出的状态都没变时才沿用; 只看client和检出时, 改了修补或渲染之后续跑会悄悄沿用旧的结果; 不看展开时, 表的条目或client.rkt改了也一样 (2026-11-11).
+- 续跑: 一个模块的结果只在client, 表的导入, 对表展开后的client (client.rkt的展开: 断言和提升的requires), 渲染和运行的代码 (render.rkt, run.rkt, module-run.rkt, repair.rkt的哈希), 检出的状态都没变时才沿用; 导入的轮次和崩溃后的对半拆开在module-run.rkt, 选哪些导入在repair.rkt, 它们都改变一个模块的结果 (到2026-11-16它们在evaluate.rkt中而不在键里, 改了导入的规则之后要手工删去`key.sha`); evaluate.rkt的其余部分 (配置, 汇总) 不在键里, 改了它不重跑; 只看client和检出时, 改了修补或渲染之后续跑会悄悄沿用旧的结果; 不看展开时, 表的条目或client.rkt改了也一样 (2026-11-11).
 - 编译错误使整个模块不被验证: 去掉有编译错误的client重跑, 至多几轮.
 - Verus本身崩溃 (求解器panic, 内存耗尽) 不是任何client的错: 不丢弃client, 把这批client对半拆开重跑, 递归到一个下限, 再合并结果.
 - 运行结束时 (包括出错时) 删去client模块, 还原模块声明, 恢复被验证改写的`Cargo.lock`.

@@ -1,6 +1,6 @@
 #lang racket/base
 ;; Imports a run's table makes that rustc reports private (pipeline/evaluate.rkt).
-(require rackunit racket/file "../lib/pipeline/evaluate.rkt")
+(require rackunit racket/file "../lib/pipeline/module-run.rkt")
 
 (define dir (make-temporary-file "cs-imports-~a" 'directory))
 (display-lines-to-file
