@@ -23,6 +23,7 @@
 | `CFG` | 评估的配置 | `data/configs/all.rktd` |
 | `VIR` | 这个提交的VIR (`.fasl`缓存) | `env.local.rktd`所在机器上的`vir-<提交>/crate.fasl` |
 | `COPY` | 同一提交的**另一份**干净的vostd检出, 供`provable`/`confirm`改写 | `/root/cs-work/vostd-cs0` |
+| `COPIES` | 再几份同一提交的干净的检出, 供`fixes`并行验证 (`cp -a COPY ..`; 15 GB内存用2份) | `/root/cs-work/vostd-cs1,/root/cs-work/vostd-cs2` |
 
 - 命令都在仓库根目录跑, `racket cli.rkt ..`; 每条命令的输出重定向到`out/<RUN的名字>-<步骤>.log`. 长的放后台, 不要轮询.
 - 本机的环境在WSL中 (`env.local.rktd`的路径是WSL的). 从Git Bash调用时加`MSYS_NO_PATHCONV=1`, 否则`/mnt/d/..`被改写成Windows路径: `MSYS_NO_PATHCONV=1 wsl -e bash -lc 'cd /mnt/d/client-synthesizer0 && ...'`.
@@ -106,10 +107,10 @@ racket cli.rkt groups RUN data/auto/knowledge data/issues --verdicts data/verdic
 **F3. 确认 [工具]: `fixes`一次.**
 
 ```bash
-racket cli.rkt fixes RUN COPY VIR FIXES-FILE --base BASE --base-run BASE-RUN > out/<RUN>-fixes.log
+racket cli.rkt fixes RUN COPY VIR FIXES-FILE --base BASE --base-run BASE-RUN --copies COPIES > out/<RUN>-fixes.log
 ```
 
-`BASE`是已确认的修改 (上一轮或本轮之前的`fixes-base`的输出, 修改的数据), 冻结: 每次验证都先打上, 不分槽, 不被归错, 不被替换; `BASE-RUN`是只打了基线的那次重跑 (上一次的`RUN/fixes/<名>/after`). 第一次没有基线时省去这两个选项. 读`RUN/fixes/<名>/facts.rktd`: 每个修改`confirmed`与否 (单独或`with`成立, 目标组都降到0), `bad-edit` (OLD对不上), 被去掉的 (`unproved`, `breaks-proof`, `compile`, `other`), 每个目标组前后的client数 (只数这组原来的client, 改为超时的算没有清除), 模块的`regressions`和新出现的组. client逐个看: `out/<RUN>-f/clients.rktd`中的每个defect client在`after/results`中通过了没有. 跑完`COPY`必须仍然干净.
+`BASE`是已确认的修改 (上一轮或本轮之前的`fixes-base`的输出, 修改的数据), 冻结: 每次验证都先打上, 不分槽, 不被归错, 不被替换; `BASE-RUN`是只打了基线的那次重跑 (上一次的`RUN/fixes/<名>/after`). 第一次没有基线时省去这两个选项. `--copies`: 单槽和`with`的验证在COPY和COPIES中并行 (结果与不并行时相同; r1第七次40分钟 → 25分钟); 跑完COPIES也必须干净. 读`RUN/fixes/<名>/facts.rktd`: 每个修改`confirmed`与否 (单独或`with`成立, 目标组都降到0), `bad-edit` (OLD对不上), 被去掉的 (`unproved`, `breaks-proof`, `compile`, `other`), 每个目标组前后的client数 (只数这组原来的client, 改为超时的算没有清除), 模块的`regressions`和新出现的组. client逐个看: `out/<RUN>-f/clients.rktd`中的每个defect client在`after/results`中通过了没有. 跑完`COPY`必须仍然干净.
 
 **F4. 修补 [LLM, 工具]: 一次.** 只对F3中被去掉的, 证不出的, 留下而组没有清除的: 读它们的错误 (`RUN/fixes/<名>/verus-rN.out`, `alone-*/`, `after/results`), 写新的修改 (新的ID, 不替换), 以F3留下且成立的为新的基线再跑一次:
 
@@ -117,7 +118,7 @@ racket cli.rkt fixes RUN COPY VIR FIXES-FILE --base BASE --base-run BASE-RUN > o
 racket cli.rkt fixes-base RUN/fixes/<F3的名>/facts.rktd FIXES-FILE BASE > out/<RUN>-f/base2.rktd
 ```
 ```bash
-racket cli.rkt fixes RUN COPY VIR FIXES-FILE-2 --base out/<RUN>-f/base2.rktd --base-run RUN/fixes/<F3的名>/after > out/<RUN>-fixes2.log
+racket cli.rkt fixes RUN COPY VIR FIXES-FILE-2 --base out/<RUN>-f/base2.rktd --base-run RUN/fixes/<F3的名>/after --copies COPIES > out/<RUN>-fixes2.log
 ```
 
 F4之后仍没有确认的, 记为`decision`, 理由写明 (修改证不出, 组仍有几个client失败及其原因, 没有只改规格的修改).

@@ -49,7 +49,7 @@
          "../base/forms.rkt" "../base/env.rkt" "../vostd/run.rkt" "../vostd/git.rkt"
          "drops.rkt" "confirm.rkt" "evaluate.rkt" "groups.rkt" "compare.rkt"
          (only-in "../vostd/trusted.rkt" trusted-sites))
-(provide fixes fixes-base base-forms fix-attributes read-fixes read-no-fixes ostd-results with-deps retry-ids group-fact fix-confirmed? plan-edits map-line blame-fix-errors fix-slots norm-file function-at)
+(provide fixes fixes-base base-forms fix-attributes parallel-map read-fixes read-no-fixes ostd-results with-deps retry-ids group-fact fix-confirmed? plan-edits map-line blame-fix-errors fix-slots norm-file function-at)
 
 ;; ================================================================ data
 
@@ -225,6 +225,30 @@
                #:unless (regexp-match? (regexp (regexp-quote m)) old))
      m)))
 
+;; parallel-map : N (item ...) (K item -> result) -> (result ...)
+;; F on each item, at most N at a time, worker K (0..N-1) doing one item at a time:
+;; a worker is a copy of vostd (design.md 3.9, --copies). Results in the items' order;
+;; an exception in a worker is raised again once all are done.
+(define (parallel-map n items f)
+  (define v (list->vector items))
+  (define out (make-vector (vector-length v) #f))
+  (define next 0)
+  (define lock (make-semaphore 1))
+  (define (take!) (call-with-semaphore lock (lambda () (and (< next (vector-length v)) (begin0 next (set! next (add1 next)))))))
+  (define failure #f)
+  (define ts
+    (for/list ([k (in-range (max 1 (min n (vector-length v))))])
+      (thread (lambda ()
+                (let loop ()
+                  (define i (take!))
+                  (when i
+                    (with-handlers ([(lambda (e) #t) (lambda (e) (call-with-semaphore lock (lambda () (unless failure (set! failure e)))))])
+                      (vector-set! out i (f k (vector-ref v i))))
+                    (loop)))))))
+  (for-each thread-wait ts)
+  (when failure (raise failure))
+  (vector->list out))
+
 ;; base-forms : facts (fix form ...) -> (fix form ...)
 ;; The forms of the fixes that held: kept, and alone or with fixes that are (design.md 3.9);
 ;; those are frozen in the next run's base. In the order of FORMS.
@@ -384,11 +408,12 @@
         (cadr r))
       '()))
 
-;; fixes : run-dir copy vir fixes-file [#:base FILE] [#:base-run DIR] -> facts
+;; fixes : run-dir copy vir fixes-file [#:base FILE] [#:base-run DIR] [#:copies (DIR ...)] -> facts
+;; COPIES: more copies of vostd (same commit, clean), to verify slots and with-sets in parallel.
 ;; BASE: fixes already confirmed, frozen (design.md 3.9): applied in every verification, never
 ;; slotted, blamed or replaced. BASE-RUN: the run with exactly the base applied (a previous
 ;; `after/`), what the clients are compared with; else the run itself.
-(define (fixes run-dir copy vir fixes-file #:base [base-file #f] #:base-run [base-run #f])
+(define (fixes run-dir copy vir fixes-file #:base [base-file #f] #:base-run [base-run #f] #:copies [extra '()])
   (define vostd (env-ref 'vostd))
   (define name (path->string (path-replace-extension (file-name-from-path fixes-file) #"")))
   (define out (build-path run-dir "fixes" name))
@@ -399,12 +424,19 @@
   (unless (string-prefix? (git-head copy) commit) (error 'fixes "~a is at ~a, the run at ~a" copy (git-head copy) commit))
   (unless (or (file-exists? (o "rounds.rktd")) (clean-copy? copy)) (error 'fixes "~a has changes: give a clean copy" copy))
   (make-directory* out)
+  (for ([c (in-list extra)])
+    (when (equal? (simplify-path (path->complete-path c)) (simplify-path (path->complete-path vostd)))
+      (error 'fixes "~a is the environment's checkout; give a copy of it" c))
+    (unless (string-prefix? (git-head c) commit) (error 'fixes "~a is at ~a, the run at ~a" c (git-head c) commit))
+    (unless (clean-copy? c) (error 'fixes "~a has changes: give a clean copy" c)))
   (define fs (read-fixes fixes-file))
   (define base (if base-file (read-fixes base-file) '()))
   (let ([dup (for/first ([f (in-list fs)] #:when (memv (fix-id f) (map fix-id base))) (fix-id f))])
     (when dup (error 'fixes "fix ~a is in the base: a confirmed fix is not replaced; write a new fix" dup)))
   (define before-dir (or base-run run-dir))
   (define target (or (env-ref 'drops-target-dir #f) (string-append (env-ref 'target-dir) "-drops")))
+  ;; the workers: COPY and the extra copies, each with its own cargo target directory
+  (define workers (cons (cons copy target) (for/list ([c (in-list extra)] [k (in-naturals 1)]) (cons c (format "~a-~a" target k)))))
   (define-values (calls-of range-of trusted? fns) (vir-facts vir))
   (define (fn-at file l) (function-at fns (norm-file file) l))
   (define (reach? f g) (reaches? calls-of f g))
@@ -454,25 +486,33 @@
      ;; alone (a slot's directory named by its fixes: another set, another directory)
      (define sl (fix-slots (map fix-id survivors) edited-fns reach?))
      (printf "alone: ~a slots (~a)\n" (length sl) (string-join (map (lambda (s) (number->string (length s))) sl) " "))
+     (define slot-results
+       (parallel-map (length workers) (for/list ([s (in-list sl)] [k (in-naturals 1)]) (cons k s))
+         (lambda (w ks)
+           (match-define (cons wcopy wtarget) (list-ref workers w))
+           (define s (cdr ks))
+           (define sfs (filter (lambda (f) (memv (fix-id f) s)) survivors))
+           (printf "slot ~a (copy ~a):\n" (car ks) w)
+           (define sdir (o (format "alone-~a" (substring (sha1 (open-input-string (format "~s" (sort (map (lambda (x) (format "~a" x)) s) string<?)))) 0 12))))
+           (cons s (removed-in (rounds wcopy sfs sdir fn-at reach? edited-fns wtarget base))))))
      (define alone0
-       (for/fold ([h (hash)]) ([s (in-list sl)] [k (in-naturals 1)])
-         (define sfs (filter (lambda (f) (memv (fix-id f) s)) survivors))
-         (printf "slot ~a:\n" k)
-         (define sdir (o (format "alone-~a" (substring (sha1 (open-input-string (format "~s" (sort (map (lambda (x) (format "~a" x)) s) string<?)))) 0 12))))
-         (define r (removed-in (rounds copy sfs sdir fn-at reach? edited-fns target base)))
-         (for/fold ([h h]) ([id (in-list s)]) (hash-set h id (match (hash-ref r id #f) [#f 'alone] [(list kind _) (list 'not-alone kind)])))))
+       (for*/fold ([h (hash)]) ([sr (in-list slot-results)] [id (in-list (car sr))])
+         (hash-set h id (match (hash-ref (cdr sr) id #f) [#f 'alone] [(list kind _) (list 'not-alone kind)]))))
      ;; with: a fix unproved alone, again with the fixes that hold alone on the functions it calls
      (define alone-ids (for/list ([f (in-list survivors)] #:when (eq? (hash-ref alone0 (fix-id f) #f) 'alone)) (fix-id f)))
-     (define alone
-       (for/fold ([h alone0]) ([f (in-list survivors)] #:when (equal? (hash-ref alone0 (fix-id f) #f) '(not-alone unproved)))
-         (define id (fix-id f))
-         (define deps (with-deps id edited-fns calls-of alone-ids))
-         (cond
-           [(null? deps) h]
-           [else
-            (define ok (verify-set copy (cons f (filter (lambda (x) (memv (fix-id x) deps)) survivors)) (o (format "with-~a" id)) target text-of base))
-            (printf "  with ~a (~a): ~a\n" id (string-join (map (lambda (d) (format "~a" d)) deps) " ") (if ok "verifies" "fails"))
-            (if ok (hash-set h id `(with ,@deps)) h)])))
+     (define with-tasks
+       (for*/list ([f (in-list survivors)] #:when (equal? (hash-ref alone0 (fix-id f) #f) '(not-alone unproved))
+                   [deps (in-value (with-deps (fix-id f) edited-fns calls-of alone-ids))] #:when (pair? deps))
+         (cons f deps)))
+     (define with-results
+       (parallel-map (length workers) with-tasks
+         (lambda (w t)
+           (match-define (cons wcopy wtarget) (list-ref workers w))
+           (match-define (cons f deps) t)
+           (define ok (verify-set wcopy (cons f (filter (lambda (x) (memv (fix-id x) deps)) survivors)) (o (format "with-~a" (fix-id f))) wtarget text-of base))
+           (printf "  with ~a (~a): ~a\n" (fix-id f) (string-join (map (lambda (d) (format "~a" d)) deps) " ") (if ok "verifies" "fails"))
+           (and ok (cons (fix-id f) `(with ,@deps))))))
+     (define alone (for/fold ([h alone0]) ([r (in-list with-results)] #:when r) (hash-set h (car r) (cdr r))))
      ;; clients: the survivors applied, the target modules rerun with COPY as the checkout
      (restore-all copy)
      (define-values (files _b) (plan-edits text-of (append base survivors)))
@@ -530,7 +570,7 @@
      (printf "confirmed: ~a of ~a\n" (count (lambda (x) (eq? (last x) 'confirmed)) fix-facts) (length fix-facts))
      (for ([m (in-list module-facts)]) (printf "  ~s\n" m))
      fix-facts)
-   (lambda () (restore-all copy))))
+   (lambda () (for ([w (in-list workers)]) (restore-all (car w))))))
 
 ;; COPY clean in all it is verified with: ostd and the libraries it depends on
 ;; (a fix may edit verified_libs/bitflags; drops.rkt's restore resets ostd/ only)

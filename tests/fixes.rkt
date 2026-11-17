@@ -149,3 +149,19 @@
 (check-equal? (fix-attributes (fix* 'R11 '("a.rs" "{ body }" "{ assume(p); body }"))) '("assume("))
 ;; an attribute already in OLD is not added by the fix
 (check-equal? (fix-attributes (fix* 'R12 '("a.rs" "#[verifier::rlimit(200)]\nfn f()" "#[verifier::rlimit(200)]\nfn f() ensures r,"))) '())
+
+;; parallel-map: every item once, results in order, at most N workers, each one item at a time
+(let* ([busy (make-vector 3 #f)] [clash #f] [seen '()] [lock (make-semaphore 1)]
+       [r (parallel-map 3 (build-list 10 values)
+                        (lambda (k i)
+                          (when (vector-ref busy k) (set! clash #t))
+                          (vector-set! busy k #t)
+                          (sleep 0.01)
+                          (call-with-semaphore lock (lambda () (set! seen (cons k seen))))
+                          (vector-set! busy k #f)
+                          (* i i)))])
+  (check-equal? r (map (lambda (i) (* i i)) (build-list 10 values)))
+  (check-false clash)
+  (check-true (andmap (lambda (k) (< -1 k 3)) seen)))
+(check-equal? (parallel-map 4 '() (lambda (k i) i)) '())
+(check-exn #rx"boom" (lambda () (parallel-map 2 '(1 2 3) (lambda (k i) (if (= i 2) (error "boom") i)))))
