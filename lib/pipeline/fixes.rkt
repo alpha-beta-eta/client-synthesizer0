@@ -38,10 +38,10 @@
 ;;   (module M (verified BEFORE AFTER) (sanity S) (regressions NAME ...) (new KEY ...))
 ;; Resumed: the rounds from rounds.rktd, a slot from its own, the clients by
 ;; evaluate's key.  COPY must be clean; it is restored at the end.
-(require racket/file racket/list racket/match racket/string racket/path racket/pretty
+(require racket/file racket/list racket/match racket/string racket/path racket/pretty file/sha1
          "../base/forms.rkt" "../base/env.rkt" "../vostd/run.rkt" "../vostd/git.rkt"
          "drops.rkt" "confirm.rkt" "evaluate.rkt" "groups.rkt" "compare.rkt")
-(provide fixes read-fixes read-no-fixes ostd-results plan-edits map-line blame-fix-errors fix-slots norm-file function-at)
+(provide fixes read-fixes read-no-fixes ostd-results retry-ids group-fact fix-confirmed? plan-edits map-line blame-fix-errors fix-slots norm-file function-at)
 
 ;; ================================================================ data
 
@@ -257,9 +257,44 @@
          (loop)])))
   (file->list rf))
 
+;; verify-set : copy (fix ...) dir target text-of -> did ostd verify with them, 0 errors
+;; One verification of a set of fixes (retry); dir/result.rktd keeps the answer.
+(define (verify-set copy fs dir target text-of)
+  (make-directory* dir)
+  (define rf (build-path dir "result.rktd"))
+  (cond
+    [(file-exists? rf) (eq? (file->value rf) 'verified)]
+    [else
+     (restore-all copy)
+     (define-values (files _bad) (plan-edits text-of fs))
+     (write-files! copy files)
+     (define log (build-path dir "verus.out"))
+     (verify-ostd copy target log)
+     (define lines (file->lines log))
+     (define-values (_v errors) (parse-verus lines))
+     (define r (ostd-results lines))
+     (restore-all copy)
+     (define ok (and r (zero? (cadr r)) (null? errors)))
+     (write-to-file (if ok 'verified 'fails) rf)
+     ok]))
+
 (define (removed-in rs)
   (for*/hash ([r (in-list rs)] #:when (eq? (car r) 'round) [b (in-list (cddddr r))] [id (in-list (cdr b))])
     (values id (list (car b) (cadr r)))))
+
+;; retry-ids : (id ...) removed -> the ids removed as breaks-proof, in the given order
+(define (retry-ids ids removed)
+  (for/list ([id (in-list ids)] #:when (match (hash-ref removed id #f) [(list 'breaks-proof _) #t] [_ #f])) id))
+
+;; group-fact : M KEY before rerun-modules after -> (M KEY BEFORE AFTER|not-run)
+;; a module no surviving fix targets was not run again: its groups are unknown, not 0
+(define (group-fact m key before ms after)
+  (list m key (hash-ref (hash-ref before m (hash)) key 0)
+        (if (member m ms) (hash-ref (hash-ref after m (hash)) key 0) 'not-run)))
+
+;; fix-confirmed? : alone (group-fact ...) -> alone, and every group at 0 after
+(define (fix-confirmed? a gs)
+  (and (eq? a 'alone) (pair? gs) (andmap (lambda (g) (eqv? 0 (list-ref g 3))) gs)))
 
 ;; a configuration of the run's, its modules only these
 (define (module-config run-dir ms file)
@@ -313,16 +348,30 @@
      ;; together
      (printf "together:\n")
      (define rs (rounds copy good out fn-at reach? edited-fns target))
-     (define removed (removed-in rs))
+     (define removed0 (removed-in rs))
+     (define survivors0 (filter (lambda (f) (not (hash-ref removed0 (fix-id f) #f))) good))
+     ;; retry: breaks-proof blames a module, so it takes out its innocent fixes too;
+     ;; each is tried again on top of the survivors (and those retried before it)
+     (define retry (retry-ids (map fix-id good) removed0))
+     (when (pair? retry) (printf "retry: ~a breaks-proof fixes\n" (length retry)))
+     (define accepted
+       (for/fold ([acc '()] #:result (reverse acc)) ([id (in-list retry)])
+         (define base (append survivors0 (filter (lambda (f) (memv (fix-id f) acc)) good)))
+         (define one (findf (lambda (f) (eqv? (fix-id f) id)) good))
+         (define ok (verify-set copy (append base (list one)) (o (format "retry-~a" id)) target text-of))
+         (printf "  retry ~a: ~a\n" id (if ok "verifies, kept" "fails, out"))
+         (if ok (cons id acc) acc)))
+     (define removed (for/hash ([(id r) (in-hash removed0)] #:unless (memv id accepted)) (values id r)))
      (define survivors (filter (lambda (f) (not (hash-ref removed (fix-id f) #f))) good))
-     ;; alone
+     ;; alone (a slot's directory named by its fixes: another set, another directory)
      (define sl (fix-slots (map fix-id survivors) edited-fns reach?))
      (printf "alone: ~a slots (~a)\n" (length sl) (string-join (map (lambda (s) (number->string (length s))) sl) " "))
      (define alone
        (for/fold ([h (hash)]) ([s (in-list sl)] [k (in-naturals 1)])
          (define sfs (filter (lambda (f) (memv (fix-id f) s)) survivors))
          (printf "slot ~a:\n" k)
-         (define r (removed-in (rounds copy sfs (o (format "alone-~a" k)) fn-at reach? edited-fns target)))
+         (define sdir (o (format "alone-~a" (substring (sha1 (open-input-string (format "~s" (sort (map (lambda (x) (format "~a" x)) s) string<?)))) 0 12))))
+         (define r (removed-in (rounds copy sfs sdir fn-at reach? edited-fns target)))
          (for/fold ([h h]) ([id (in-list s)]) (hash-set h id (match (hash-ref r id #f) [#f 'alone] [(list kind _) (list 'not-alone kind)])))))
      ;; clients: the survivors applied, the target modules rerun with COPY as the checkout
      (restore-all copy)
@@ -338,20 +387,23 @@
      ;; facts
      (define before (for/hash ([m (in-list ms)]) (values m (group-clients run-dir m))))
      (define after (for/hash ([m (in-list ms)]) (values m (group-clients (o "after") m))))
+     ;; the run's groups of any module a fix targets, rerun or not
+     (define before*
+       (for*/fold ([h before]) ([f (in-list fs)] [g (in-list (fix-groups f))] #:unless (hash-has-key? h (car g)))
+         (hash-set h (car g) (group-clients run-dir (car g)))))
      (define cmp (compare-runs run-dir (o "after")))
      (define fix-facts
        (for/list ([f (in-list fs)])
          (define id (fix-id f))
-         (define gs (for/list ([g (in-list (fix-groups f))])
-                      (list (car g) (cadr g)
-                            (hash-ref (hash-ref before (car g) (hash)) (cadr g) 0)
-                            (hash-ref (hash-ref after (car g) (hash)) (cadr g) 0))))
+         ;; AFTER is not-run for a module no surviving fix targets (it was not run
+         ;; again: a removed fix's groups there are not 0, they are unknown)
+         (define gs (for/list ([g (in-list (fix-groups f))]) (group-fact (car g) (cadr g) before* ms after)))
          (define st (cond [(assv id bad) => (lambda (b) `(bad-edit ,(cdr b)))]
                           [(hash-ref removed id #f) => (lambda (r) `(removed ,@r))]
                           [else '(kept)]))
          (define a (hash-ref alone id #f))
          `(fix ,id ,@st ,@(if a (list a) '()) (groups ,@gs)
-               ,(if (and (eq? a 'alone) (pair? gs) (andmap (lambda (g) (zero? (list-ref g 3))) gs)) 'confirmed 'not-confirmed))))
+               ,(if (fix-confirmed? a gs) 'confirmed 'not-confirmed))))
      (define module-facts
        (for/list ([m (in-list ms)])
          (define (summary dir) (for/first ([l (in-list (file->list (build-path dir "modules.rktd")))] #:when (equal? (cadr l) m)) l))

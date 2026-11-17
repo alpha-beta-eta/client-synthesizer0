@@ -67,7 +67,7 @@
          "../vostd/vir.rkt" "../vostd/git.rkt" "../vostd/trusted.rkt"
          (only-in "../analysis/drops.rkt" vir-calls)
          "groups.rkt" "drops.rkt" "evaluate.rkt")
-(provide confirm slots group-status norm-path vir-facts enclosing-function fn-module reaches?)
+(provide confirm slots group-status norm-path vir-facts enclosing-function fn-module reaches? rests-on)
 
 ;; ================================================================ pure parts
 
