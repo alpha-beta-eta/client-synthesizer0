@@ -65,3 +65,19 @@
                                     "verification results:: 0 verified, 1 errors"))])
   (check-false (list-ref (car es) 3))
   (check-equal? (list-ref (car es) 4) '(("ostd/src/mm/io/cs_clients.rs" . 4698))))
+
+;; a trigger note after an error is not that error's: its `-->` is another fix's quantifier
+;; (r1 fixes round6: frame-8 blamed for an error in frame6-1's lemma)
+(let-values ([(v es) (parse-verus '("error: assertion failed"
+                                    "   --> ostd/src/../specs/mm/frame/linked_list/linked_list_owners.rs:595:25"
+                                    "    |"
+                                    "595 |                 implies l2.relate_region(regions) by {"
+                                    ""
+                                    "note: automatically chose triggers for this expression:"
+                                    "   --> ostd/src/mm/frame/segment.rs:641:13"
+                                    "note:   trigger 1 of 1:"
+                                    "   --> ostd/src/mm/frame/segment.rs:641:43"
+                                    "note: Verus printed one or more automatically chosen quantifier triggers"
+                                    "error: could not compile `ostd` (lib) due to 1 previous error"))])
+  (check-equal? (length es) 1)
+  (check-equal? (list-ref (car es) 4) '(("ostd/specs/mm/frame/linked_list/linked_list_owners.rs" . 595))))

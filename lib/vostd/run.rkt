@@ -198,9 +198,11 @@
             ;; Verus's own notes are separate diagnostics, not this error's: an
             ;; expansion (--expand-errors) belongs to an earlier error (attribute);
             ;; a recommendation not met (with its `:::` location, which would be
-            ;; taken as this error's callee) and the progress note belong to none
+            ;; taken as this error's callee), the progress note and the trigger
+            ;; notes (whose `-->` points at whatever quantifier Verus chose
+            ;; triggers for, design.md 4.1) belong to none
             (define-values (block _rest)
-              (splitf-at whole (lambda (x) (not (regexp-match? #px"^note: (diagnostics via expansion|recommendation not met|verifying module)" x)))))
+              (splitf-at whole (lambda (x) (not (regexp-match? #px"^note: (diagnostics via expansion|recommendation not met|verifying module|automatically chose triggers|Verus printed one or more automatically chosen)" x)))))
             (define note (memf (lambda (x) (regexp-match? #px"^note: diagnostics via expansion" x)) whole))
             (define loc (for/or ([b (in-list block)]) (regexp-match #px"^\\s*--> (.*):([0-9]+):[0-9]+$" b)))
             (define callee (for/or ([b (in-list block)]) (regexp-match #px"^\\s*::: (.*):([0-9]+):[0-9]+$" b)))
