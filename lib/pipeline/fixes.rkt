@@ -48,7 +48,7 @@
 (require racket/file racket/list racket/match racket/string racket/path racket/pretty file/sha1
          "../base/forms.rkt" "../base/env.rkt" "../vostd/run.rkt" "../vostd/git.rkt"
          "drops.rkt" "confirm.rkt" "evaluate.rkt" "groups.rkt" "compare.rkt")
-(provide fixes read-fixes read-no-fixes ostd-results with-deps retry-ids group-fact fix-confirmed? plan-edits map-line blame-fix-errors fix-slots norm-file function-at)
+(provide fixes fixes-base base-forms read-fixes read-no-fixes ostd-results with-deps retry-ids group-fact fix-confirmed? plan-edits map-line blame-fix-errors fix-slots norm-file function-at)
 
 ;; ================================================================ data
 
@@ -213,6 +213,22 @@
       (cond [(null? after) (append (reverse before) (list (list id)))]
             [(ormap (lambda (x) (rel? x id)) (car after)) (loop (cons (car after) before) (cdr after))]
             [else (append (reverse before) (list (cons id (car after))) (cdr after))]))))
+
+;; base-forms : facts (fix form ...) -> (fix form ...)
+;; The forms of the fixes that held: kept, and alone or with fixes that are (design.md 3.9);
+;; those are frozen in the next run's base. In the order of FORMS.
+(define (base-forms facts forms)
+  (define held
+    (for/list ([x (in-list facts)]
+               #:when (and (pair? x) (eq? (car x) 'fix) (eq? (caddr x) 'kept))
+               #:when (for/or ([y (in-list (cdddr x))]) (or (eq? y 'alone) (and (pair? y) (eq? (car y) 'with)))))
+      (cadr x)))
+  (for/list ([f (in-list forms)] #:when (and (pair? f) (eq? (car f) 'fix) (memv (cadr f) held))) f))
+
+;; fixes-base : facts-file fixes-file [previous-base-file] -> (fix form ...), the previous base then the new
+(define (fixes-base facts-file fixes-file [prev #f])
+  (append (if prev (filter (lambda (x) (and (pair? x) (eq? (car x) 'fix))) (file->list prev)) '())
+          (base-forms (file->list facts-file) (file->list fixes-file))))
 
 ;; ================================================================ running
 

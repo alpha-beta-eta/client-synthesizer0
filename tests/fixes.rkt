@@ -134,3 +134,10 @@
   (check-equal? b '()) (check-equal? (length u) 1))
 (let-values ([(b u) (blame-fix-errors (list (err "assertion failed" "a.rs" 3)) spans-of fn-at (lambda (g f) #t) edited '(R2) #t)])
   (check-equal? b '((breaks-proof R2))) (check-equal? u '()))
+
+;; the next base: kept fixes that hold alone or with others; not removed, not unproved alone
+(check-equal? (base-forms '((fix A kept alone (groups) confirmed) (fix B kept (with A) (groups) confirmed)
+                            (fix C kept (not-alone unproved) (groups) not-confirmed) (fix D removed other 1 (groups) not-confirmed)
+                            (module "m" (verified 1 2)))
+                          '((fix D (groups)) (fix C (groups)) (fix B (groups)) (fix A (groups)) (no-fix ("m" "k") "w")))
+              '((fix B (groups)) (fix A (groups))))

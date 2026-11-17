@@ -71,7 +71,7 @@
          "lib/pipeline/scan.rkt" "lib/pipeline/check-knowledge.rkt" "lib/pipeline/evaluate.rkt"
          "lib/pipeline/groups.rkt" "lib/pipeline/refute.rkt" "lib/pipeline/provable.rkt" "lib/pipeline/confirm.rkt"
          "lib/pipeline/compare.rkt" "lib/pipeline/drops.rkt" "lib/pipeline/rename.rkt" "lib/pipeline/trusted.rkt"
-         "lib/pipeline/regress.rkt" "lib/pipeline/coverage.rkt" (only-in "lib/pipeline/fixes.rkt" fixes)
+         "lib/pipeline/regress.rkt" "lib/pipeline/coverage.rkt" (only-in "lib/pipeline/fixes.rkt" fixes fixes-base)
          "lib/vostd/spec-digest.rkt" "lib/base/env.rkt" "lib/pipeline/environment.rkt"
          (only-in "lib/vostd/vir.rkt" cache-vir))
 
@@ -179,9 +179,10 @@
                                    #:issue (match (member "--issue" more) [(list* _ i _) (string->symbol i)] [_ #f])
                                    #:by? (not (member "--any-culprit" more))))]
     [(vector "groups" dir more0 ...)
-     ;; options anywhere after RUN-DIR: --verdicts DIR, --digests FILE
+     ;; options anywhere after RUN-DIR: --verdicts DIR, --digests FILE, --members (every group's clients)
      (define (opt name) (match (member name more0) [(list* _ v _) v] [_ #f]))
-     (define more (let loop ([xs more0])
+     (define members? (and (member "--members" more0) #t))
+     (define more (let loop ([xs (remove "--members" more0)])
                     (match xs
                       [(list* (or "--verdicts" "--digests") _ rest) (loop rest)]
                       [(cons x rest) (cons x (loop rest))]
@@ -190,7 +191,7 @@
      (define more2 (if kdir (cdr more) more))
      (define idir (and kdir (pair? more2) (directory-exists? (car more2)) (car more2)))
      (define rx (let ([r (if idir (cdr more2) more2)]) (if (pair? r) (regexp (car r)) #rx"")))
-     (for-each pretty-write (group-failures dir kdir rx idir #:verdicts (opt "--verdicts") #:digests (opt "--digests")))]
+     (for-each pretty-write (group-failures dir kdir rx idir #:verdicts (opt "--verdicts") #:digests (opt "--digests") #:members? members?))]
     [(vector "provable" dir copy more0 ...)
      ;; --unlabelled KNOWLEDGE-DIR ISSUES-DIR VERDICTS-DIR
      (define ul (let ([t (member "--unlabelled" more0)])
@@ -200,6 +201,9 @@
                     (if ul (let-values ([(a b) (splitf-at m (lambda (x) (not (equal? x "--unlabelled"))))]) (append a (drop b 4))) m)))
      (void (provable dir copy (if (pair? more) (pregexp (car more)) #rx"") #:dry? (and (member "--dry" more0) #t)
                      #:unlabelled ul))]
+    ;; fixes-base FACTS FIXES-FILE [PREVIOUS-BASE]: the next run's base, the fixes that held (design.md 3.9)
+    [(vector "fixes-base" facts file more ...)
+     (for-each writeln (fixes-base facts file (and (pair? more) (car more))))]
     [(vector "fixes" dir copy vir file more ...)
      ;; --base FILE: confirmed fixes, frozen; --base-run DIR: the run with exactly the base (design.md 3.9)
      (define (opt name) (match (member name more) [(list* _ v _) v] [_ #f]))
