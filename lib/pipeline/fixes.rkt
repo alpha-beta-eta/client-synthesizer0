@@ -288,11 +288,17 @@
 (define (retry-ids ids removed)
   (for/list ([id (in-list ids)] #:when (match (hash-ref removed id #f) [(list 'breaks-proof _) #t] [_ #f])) id))
 
-;; group-fact : M KEY before rerun-modules after -> (M KEY BEFORE AFTER|not-run)
-;; a module no surviving fix targets was not run again: its groups are unknown, not 0
-(define (group-fact m key before ms after)
-  (list m key (hash-ref (hash-ref before m (hash)) key 0)
-        (if (member m ms) (hash-ref (hash-ref after m (hash)) key 0) 'not-run)))
+;; group-fact : M KEY before rerun-modules after timeouts -> (M KEY BEFORE AFTER|not-run)
+;; BEFORE and AFTER, hashes M -> KEY -> (client ...); TIMEOUTS, M -> (client ...) timed out after.
+;; AFTER counts the group's own clients (design.md 3.9): those still in it, and those that now time
+;; out (a timed-out client is in no group: its result on the clause is unknown, not a pass).
+;; A module no surviving fix targets was not run again: its groups are unknown, not 0.
+(define (group-fact m key before ms after [timeouts (hash)])
+  (define b (hash-ref (hash-ref before m (hash)) key '()))
+  (define a (hash-ref (hash-ref after m (hash)) key '()))
+  (define t (hash-ref timeouts m '()))
+  (list m key (length b)
+        (if (member m ms) (count (lambda (c) (or (memq c a) (memq c t))) b) 'not-run)))
 
 ;; fix-confirmed? : alone (group-fact ...) -> alone (or with fixes that are), and every group at 0 after
 (define (fix-confirmed? a gs)
@@ -326,10 +332,23 @@
                            (match f [`(,(and k (or 'auto 'knowledge 'identity 'providers)) ,(? string? p)) `(,k ,(abs p))] [_ f]))
                        (modules ,(format "^(~a)[.]rktd$" (string-join (map regexp-quote ms) "|")))))))
 
+;; group-clients : run-dir M -> hash KEY -> (client ...), the members of each group
 (define (group-clients run-dir m)
-  (define mods (group-failures run-dir #f (regexp (format "^~a$" (regexp-quote m)))))
+  (define mods (group-failures run-dir #f (regexp (format "^~a$" (regexp-quote m))) #:members? #t))
   (for*/hash ([mod (in-list mods)] [g (in-list (cddr mod))] #:when (and (pair? g) (eq? (car g) 'group)))
-    (values (cadr g) (cadr (assq 'clients (cddr g))))))
+    (values (cadr g) (cdr (assq 'members (cddr g))))))
+
+;; timed-out-clients : run-dir M -> (client ...), failed with a resource limit or timeout
+(define (timed-out-clients run-dir m)
+  (define f (build-path run-dir "results" m "results.rktd"))
+  (if (file-exists? f)
+      (for/list ([r (in-list (file->list f))]
+                 #:when (and (pair? r) (eq? (car r) 'client) (eq? (caddr r) 'failed))
+                 #:when (for/or ([e (in-list (cdddr r))])
+                          (and (pair? e) (eq? (car e) 'error) (string? (cadddr e))
+                               (regexp-match? #rx"rlimit|resource limit|timed out" (cadddr e)))))
+        (cadr r))
+      '()))
 
 ;; fixes : run-dir copy vir fixes-file -> facts
 (define (fixes run-dir copy vir fixes-file)
@@ -416,6 +435,7 @@
      ;; facts
      (define before (for/hash ([m (in-list ms)]) (values m (group-clients run-dir m))))
      (define after (for/hash ([m (in-list ms)]) (values m (group-clients (o "after") m))))
+     (define timeouts (for/hash ([m (in-list ms)]) (values m (timed-out-clients (o "after") m))))
      ;; the run's groups of any module a fix targets, rerun or not
      (define before*
        (for*/fold ([h before]) ([f (in-list fs)] [g (in-list (fix-groups f))] #:unless (hash-has-key? h (car g)))
@@ -426,7 +446,7 @@
          (define id (fix-id f))
          ;; AFTER is not-run for a module no surviving fix targets (it was not run
          ;; again: a removed fix's groups there are not 0, they are unknown)
-         (define gs (for/list ([g (in-list (fix-groups f))]) (group-fact (car g) (cadr g) before* ms after)))
+         (define gs (for/list ([g (in-list (fix-groups f))]) (group-fact (car g) (cadr g) before* ms after timeouts)))
          (define st (cond [(assv id bad) => (lambda (b) `(bad-edit ,(cdr b)))]
                           [(hash-ref removed id #f) => (lambda (r) `(removed ,@r))]
                           [else '(kept)]))

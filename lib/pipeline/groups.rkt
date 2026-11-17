@@ -139,7 +139,7 @@
 ;;        (group TEXT (clients N) (first N) [(after (TEXT N) ...)] (example NAME) (labels (KIND API-or-ID) ...)) ...) ...)
 ;; Groups are ordered: unlabelled first, then those whose clause fails first
 ;; in more clients, then by size.
-(define (group-failures run-dir kdir [only #rx""] [idir #f] #:verdicts [vdir #f] #:digests [dfile #f])
+(define (group-failures run-dir kdir [only #rx""] [idir #f] #:verdicts [vdir #f] #:digests [dfile #f] #:members? [members? #f])
   (define results-dir (build-path run-dir "results"))
   (define issues (if idir (read-issues idir) '()))
   (define verdicts (if vdir (read-verdicts vdir) '()))
@@ -325,6 +325,8 @@
                 ,@(if (equal? (hash-ref texts text text) text) '() `((text ,(hash-ref texts text))))
                 ,@(let ([ms (hash-ref members text '())]) (if (null? ms) '() `((clauses ,@ms))))
                 (clients ,(length clients)) (first ,(length (hash-ref firsts text '()))) ,@after
+                ;; the clients themselves, on request (fixes.rkt counts a group by its members)
+                ,@(if members? `((members ,@(reverse clients))) '())
                 ,@(if (> tied 0) `((tied ,tied)) '())
                 ;; the calls that should have given the fact, by clients (attribute.rkt)
                 ,@(let ([h (hash-ref bys text #f)])

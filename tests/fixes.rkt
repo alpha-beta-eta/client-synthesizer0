@@ -107,10 +107,14 @@
 (check-equal? (retry-ids '(A B C D) (hash 'D '(breaks-proof 1) 'B '(breaks-proof 2) 'C '(unproved 1)))
               '(B D))
 ;; a group in a module that was not run again is not-run, not 0
-(define bef (hash "mm.io" (hash "k1" 3) "mm.frame" (hash "k2" 2)))
+(define bef (hash "mm.io" (hash "k1" '(a b c)) "mm.frame" (hash "k2" '(d e))))
 (define aft (hash "mm.io" (hash)))
 (check-equal? (group-fact "mm.io" "k1" bef '("mm.io") aft) '("mm.io" "k1" 3 0))
 (check-equal? (group-fact "mm.frame" "k2" bef '("mm.io") aft) '("mm.frame" "k2" 2 not-run))
+;; AFTER counts the group's own clients: still in it, or timed out (unknown); a new member is not counted
+(check-equal? (group-fact "mm.io" "k1" bef '("mm.io") (hash "mm.io" (hash "k1" '(a z))) (hash "mm.io" '(c)))
+              '("mm.io" "k1" 3 2))
+(check-false (fix-confirmed? 'alone (list (group-fact "mm.io" "k1" bef '("mm.io") aft (hash "mm.io" '(b))))))
 (check-true (fix-confirmed? 'alone '(("mm.io" "k1" 3 0))))
 (check-false (fix-confirmed? 'alone '(("mm.frame" "k2" 2 not-run))))
 (check-false (fix-confirmed? '(not-alone breaks-proof) '(("mm.io" "k1" 3 0))))
