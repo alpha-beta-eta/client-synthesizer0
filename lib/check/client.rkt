@@ -48,7 +48,7 @@
 (provide check-client client-name
          (struct-out st) (struct-out var) (struct-out ill)
          initial-state check-call bind-call check-stmt enter-if-let merge-branches
-         usable-vars spec-read unclosed type-param-name)
+         usable-vars spec-read unclosed type-param-name lift-clauses liftable?)
 
 ;; ================================================================ state
 
@@ -61,8 +61,9 @@
 (struct var (mode type state param? touched? borrows) #:transparent)
 
 ;; st: the checking state.  env: name -> var; bounds: type param -> bounds;
-;; requires: lifted clauses, in order.
-(struct st (table env bounds requires) #:transparent)
+;; requires: lifted clauses, in order; used: the variables some call took as an
+;; argument (any way, a copy too), for lift-clauses' second exception.
+(struct st (table env bounds requires used) #:transparent)
 
 ;; ill: raised for a client that is not well-formed.
 (struct ill (id fact) #:transparent)
@@ -75,6 +76,7 @@
         (values (param-name p) (var (param-mode p) (param-type p) 'live #t #f '())))
       (for/hash ([t (in-list type-params)])
         (if (pair? t) (values (car t) (cdr t)) (values t '())))
+      '()
       '()))
 
 (define (type-param-name t) (if (pair? t) (car t) t))
@@ -358,7 +360,8 @@
                                              [touched? (or (var-touched? va) (var-touched? vb))])))]
                [bounds (for/hash ([(t bs) (in-hash (st-bounds a*))])
                          (values t (remove-duplicates (append bs (hash-ref (st-bounds b*) t '())))))]
-               [requires (remove-duplicates (append (st-requires a*) (st-requires b*)))]))
+               [requires (remove-duplicates (append (st-requires a*) (st-requires b*)))]
+               [used (remove-duplicates (append (st-used a*) (st-used b*)))]))
 
 (define (env-set s x v) (struct-copy st s [env (hash-set (st-env s) x v)]))
 
@@ -556,7 +559,7 @@
   (define ret (api-ret api))
   (when (and x (not ret)) (fail id 'unit-result-bound (api-name api) x))
   (define s1 (add-bounds (lift-requires s api (caddr call) (cadddr call) subst) id api subst))
-  (define s2 (apply-effects s1 id effects))
+  (define s2 (mark-used (apply-effects s1 id effects) (append (caddr call) (cadddr call))))
   (define ret-type (and ret (subst-type ret subst)))
   (check-inferred id api subst)
   ;; a mutable borrow of x is recorded also as (mut . x): while the borrower
@@ -745,13 +748,66 @@
 ;; client assumes it at entry (`old(p).inv()`) and the call that touched p
 ;; must keep it.  Not lifting it made every path on which the touching call
 ;; says nothing (an Err branch) fail at it.
+;; And a clause between a parameter no call has used yet and parameters only
+;; borrowed `&mut` so far (`p.wf(*regions)` after a call took `&mut regions`):
+;; a real caller's p is good at the start, so the client assumes it of the entry
+;; values (render writes `&mut` parameters as `old(x)` in its requires), and the
+;; call that asks it checks that the calls before kept it (design.md 3.4).
 (define (lift-clauses s clauses)
-  (define new
-    (for/list ([e (in-list clauses)]
-               #:when (or (andmap (lambda (x) (untouched-param? s x)) (expr-vars e))
-                          (param-invariant? s e)))
-      e))
+  (define new (for/list ([e (in-list clauses)] #:when (liftable? s e)) e))
   (struct-copy st s [requires (remove-duplicates (append (st-requires s) new))]))
+
+;; liftable? : st E -> boolean, whether lift-clauses makes E a requires of the client.
+;; The second exception: every variable a live client parameter, those not borrowed
+;; `&mut` yet taken by no call at all (not even copied: `paddr` given to
+;; `from_unused` and then to `inc_frame_ref_count` is the same slot, and assuming
+;; at the entry what the second call needs would answer the first call's question),
+;; and at least one of them.
+(define (liftable? s e)
+  (define xs (expr-vars e))
+  (define (v x) (hash-ref (st-env s) x #f))
+  (or (andmap (lambda (x) (untouched-param? s x)) xs)
+      (param-invariant? s e)
+      (and (pair? xs)
+           (for/and ([x (in-list xs)])
+             (and (v x) (var-param? (v x)) (eq? (var-state (v x)) 'live)
+                  (or (var-touched? (v x)) (not (memq x (st-used s))))))
+           (for/or ([x (in-list xs)]) (and (untouched-param? s x) (not (memq x (st-used s)))))
+           (not (same-relation-elsewhere? s e)))))
+
+;; same-relation-elsewhere? : st E -> boolean
+;; One owner describes one object: a requires already says the same of another
+;; object (the clause with its receiver taken out: `self_.0.invariants(*owner, ..)`
+;; and `self__g.pt_cursor.0.invariants(*owner, ..)`), so assuming E too would say
+;; the owner describes two objects, a contradiction (design.md 3.4).
+(define (same-relation-elsewhere? s e)
+  (define-values (shape root) (receiver-shape e))
+  (and shape
+       (for/or ([r (in-list (st-requires s))])
+         (define-values (shape2 root2) (receiver-shape r))
+         (and shape2 (equal? shape shape2) (not (eq? root root2))))))
+
+;; receiver-shape : E -> (values E-with-the-receiver-taken-out root) or (values #f #f)
+(define (receiver-shape e)
+  (define (root x)
+    (match x
+      [(? symbol? v) v]
+      [`(,(or 'field 'arrow) ,a ,_) (root a)]
+      [`(,(or 'deref 'old) ,a) (root a)]
+      [_ #f]))
+  (match e
+    [`(method ,recv ,m ,args ...) #:when (root recv) (values `(method _ ,m ,@args) (root recv))]
+    [_ (values #f #f)]))
+
+;; mark-used : st (A ...) -> st, the variables of a call's arguments as used
+(define (mark-used s args)
+  (define xs (append* (for/list ([a (in-list args)])
+                        (match a
+                          [(? symbol? x) (list x)]
+                          [`(spec ,e) (expr-vars e)]
+                          [`(,_ ,(? symbol? x)) (list x)]
+                          [_ '()]))))
+  (struct-copy st s [used (remove-duplicates (append (st-used s) xs))]))
 
 ;; spec-read : st id E -> st; every variable E mentions must be usable.
 ;; A spec use of x reads x as a shared borrow does (rustc: E0502 when a
