@@ -161,12 +161,20 @@
 
 (define (tuple-ret? a) (match (api-ret a) [`(tuple ,_ ..1) #t] [_ #f]))
 
-;; after-err-client : table H G assumptions -> client or #f
+;; after-err-client : table H G assumptions [roles] -> client or #f
 ;; goal_err_<H>_<G>: H called as in its probe; in its Err (None) branch, G's
 ;; requires asserted, G taking H's parameter where the type and mode are the
-;; same (the state H left), a new parameter elsewhere; only when G takes at
-;; least one variable H took by `&mut`.  #f when H's result is no Result/Option.
-(define (after-err-client table h g as)
+;; same (the state H left) and the roles agree (when both are known: a reader's
+;; owner is not passed as a writer's, design.md 3.5), a new parameter elsewhere;
+;; only when G takes at least one variable H took by `&mut`.  #f when H's result
+;; is no Result/Option.  roles: the call knowledge's ((API PARAM ROLE) ...).
+(define (after-err-client table h g as [roles '()])
+  (define (role-of api x)
+    (for/list ([r (in-list roles)] #:when (and (eq? (car r) (api-name api)) (eq? (cadr r) x))) (caddr r)))
+  (define (roles-agree? hp q)
+    (define hr (role-of h (if (eq? (car hp) 'self_) 'self (car hp))))
+    (define gr (role-of g (param-name q)))
+    (or (null? hr) (null? gr) (and (for/or ([r (in-list hr)]) (memq r gr)) #t)))
   (define probe (probe-client h))
   (define call-stmt (for/first ([s (in-list (form-ref probe 'body))] #:when (match s [`(let ,_ ,_) #t] [_ #f])) s))
   (define ctor (match (api-ret h) [`(Result ,_ ,_) 'Ok] [`(Option ,_) 'Some] [_ #f]))
@@ -180,7 +188,8 @@
       (define hit (for/first ([hp (in-list hparams)]
                               #:when (and (not (memq (car hp) used))
                                           (eq? (cadr hp) (match (param-mode q) ['spec 'ghost] [m m]))
-                                          (equal? (caddr hp) want)))
+                                          (equal? (caddr hp) want)
+                                          (roles-agree? hp q)))
                     (car hp)))
       (cond [hit (set! used (cons hit used)) hit]
             [else (string->symbol (format "~a_g" (local (param-name q))))])))

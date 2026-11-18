@@ -185,7 +185,7 @@
             (filter (lambda (c) (touch-matters? table c (list (car fo) h g) h g 1))
                     (realize (list (car fo) h g) '((out 0 2) (touch 1 2)) 'produce+touch)))))
        (define r2-err
-         (for*/list ([h hs] [c (in-value (let ([c (after-err-client table h g (assumed h))]) (and c (keep c))))] #:when c)
+         (for*/list ([h hs] [c (in-value (let ([c (after-err-client table h g (assumed h) roles)]) (and c (keep c))))] #:when c)
            (tag c 'touch-err)))
        ;; R3: G took an argument; G again on a produced value, else a new parameter
        (define cps (consumed-params table g))

@@ -67,9 +67,16 @@
       [`(Result ,u ,_) (values (list 'x u #t 'exec) 'Ok)]
       [`(Option ,u) (values (list 'x u #t 'exec) 'Some)]
       [u (values (list 'r u #t 'exec) #f)]))
+  ;; and the object F worked on (F's `&mut` exec parameter: the writer F filled),
+  ;; with the flag of the produced values: shared only where G's requires tie it to
+  ;; the flowing value (the owner F returned for it), design.md 3.5
+  (define fobjs
+    (for/list ([fp (in-list fparams)] #:when (and (eq? (cadr fp) 'exec) (match (caddr fp) [`(&mut ,_) #t] [_ #f])))
+      (list (car fp) (caddr fp) #t 'exec)))
   (define sharable
     (append (if fgret (list fgret) '())
             (if fres (list fres) '())
+            fobjs
             (for/list ([fp (in-list fparams)] #:when (eq? (cadr fp) 'tracked)) (list (car fp) (caddr fp) #f 'tracked))))
   ;; all the roles of a parameter (or ret, gret): it may have several (enum.rkt's param-roles)
   (define (role-of api x)
@@ -109,13 +116,18 @@
                  (loop (cdr qs) (add1 j) (remq c free) (cons (cons j (car c)) acc))
                  (loop (cdr qs) (add1 j) free acc))]))
         '()))
-;; A tracked parameter of G left fresh that G's requires tie to the flowing
-  ;; value (`x.0.invariants(*owner_g, ..)` for a cursor with an owner no call
-  ;; produced): the clause cannot hold, and the client would fail for that
-  ;; alone.  No such client (#f), as consistent-fresh does in protocols.
+  ;; A parameter of G left fresh that G's requires tie to the flowing value
+  ;; (`x.0.invariants(*owner_g, ..)` for a cursor with an owner no call produced;
+  ;; `self_g.wf(gr)`, a new writer with the owner F returned): the clause cannot
+  ;; hold, and the client would fail for that alone.  No such client (#f), as
+  ;; consistent-fresh does in protocols.  An exec one too when what flows is F's
+  ;; ghost result, an owner (2026-11-18, design.md 3.5); not when it is a value:
+  ;; `split(offset)` with `offset <= self.size()` asks for an offset chosen for the
+  ;; segment, as a caller does (five such flow clients verified).
   (define fresh-tied?
     (for/or ([q (in-list gps)] [j (in-naturals)]
-             #:when (and (not (= j i)) (not (assv j shared)) (eq? (param-mode q) 'tracked)))
+             #:when (and (not (= j i)) (not (assv j shared))
+                         (or (eq? (param-mode q) 'tracked) (and (eq? (param-mode q) 'exec) (eq? kind 'gret)))))
       (for/or ([r (in-list (api-requires g))])
         (define vs (expr-vars r))
         (and (memq (param-name p) vs) (memq (param-name q) vs) #t))))
