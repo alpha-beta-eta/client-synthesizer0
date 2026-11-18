@@ -1,5 +1,9 @@
 # client-synthesizer0
 
+> **For vostd maintainers:** the specification defects found at vostd `8e4b202d6`, each with the code, a
+> failing client, Verus's error and how to fix it, are in
+> [findings/defects-8e4b202d6.md](findings/defects-8e4b202d6.md) (English).
+
 为[vostd](https://github.com/asterinas/vostd) (Asterinas内核`ostd`的Verus验证版本) 合成**按真实用法调用API的client**, 用它们检验规格是否够调用者用; 列出并审计Verus信任而不检查的代码.
 
 这是[vostd-client-synthesizer](https://github.com/alpha-beta-eta/vostd-client-synthesizer) (下称"前身") 的整理版, 一个单独的仓库. 前身是一系列探索 (2026-11-06到2026-11-15, 记录在前身的`docs/`) 的累积: 每次试验都留下了代码, 选项和数据格式, 有的后来被更好的做法取代, 有的只为一次实验存在. 本版只保留确实带来结论的部分, 把试验中遇到的细节问题按原则一次改好, 而不是继续修补. 结果不要求与前身逐个client一致.
