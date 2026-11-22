@@ -1,10 +1,11 @@
 #lang racket/base
 ;; The structure of results (design.md 3.1): a tuple taken apart (untuple), and
 ;; the Err payload bound in the else branch; checked by client.rkt, written by
-;; render.rkt.  On the extracted tables of vostd 8e4b202d6 (data/ is the user's:
+;; render.rkt.  On the extracted tables (data/ is the user's; APIs by source key:
 ;; skipped when the tables are not there).
 (require rackunit racket/file racket/string racket/match racket/runtime-path
-         "../lib/model/api.rkt" "../lib/check/client.rkt" "../lib/gen/render.rkt")
+         "../lib/model/api.rkt" "../lib/check/client.rkt" "../lib/gen/render.rkt"
+         "table-keys.rkt")
 
 (define-runtime-path apis "../data/auto/apis")
 (define nn (build-path apis "sync.rcu.non_null.rktd"))
@@ -18,8 +19,8 @@
 
 (when (file-exists? nn)
   (define t (read-api-table nn))
-  (define into-raw '|sync::rcu::non_null::impl&%2::into_raw|)
-  (define from-raw '|sync::rcu::non_null::impl&%2::from_raw|)
+  (define into-raw (api-by-key nn "sync::rcu::non_null::<Box<T> as NonNullPtr>::into_raw"))
+  (define from-raw (api-by-key nn "sync::rcu::non_null::<Box<T> as NonNullPtr>::from_raw"))
   ;; the modes from the source's return type: (NonNull<..>, Tracked<..>)
   (check-equal? (api-ret-modes (api-ref t into-raw)) '(exec tracked))
   ;; into_raw's pointer and permission go to from_raw separately
@@ -45,7 +46,7 @@
 
 (when (file-exists? uq)
   (define t (read-api-table uq))
-  (define try-from '|mm::frame::unique::impl&%9::try_from|)
+  (define try-from (api-by-key uq "mm::frame::unique::<UniqueFrame<M> as TryFrom<Frame<M>>>::try_from"))
   ;; Err(frame) gives the frame back: the else branch has it
   (define c
     `(client c (type-params (M AnyFrameMeta (Repr MetaSlotStorage) OwnerOf)) (params (f exec (Frame M))) (allow-open)

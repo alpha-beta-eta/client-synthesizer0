@@ -39,14 +39,15 @@
 
 ;; end to end, on the real table: `paddr` given to from_unused is not fresh at inc_frame_ref_count,
 ;; so its ref_count clause is not assumed at the entry (that made the Ok branch vacuous)
-(require racket/runtime-path racket/list "../lib/model/api.rkt")
+(require racket/runtime-path racket/list "../lib/model/api.rkt" "table-keys.rkt")
 (define-runtime-path frame-table "../data/auto/apis/mm.frame.rktd")
 (when (file-exists? frame-table)
   (define t (read-api-table frame-table))
-  (define c '(client c (type-params (M AnyFrameMeta (Repr MetaSlotStorage) OwnerOf))
-                     (params (paddr exec usize) (metadata exec M) (regions tracked (&mut MetaRegionOwners))
-                             (repr_perm tracked (&mut (assoc M ReprPerm "vstd_extra::cast_ptr::Repr<MetaSlotStorage>"))))
-                     (body (let r (call mm::frame::impl&%5::from_unused (paddr metadata) (regions repr_perm)))
+  (define from-unused (api-by-key frame-table "mm::frame::Frame<M>::from_unused"))
+  (define c `(client c (type-params (M AnyFrameMeta (Repr MetaSlotStorage) OwnerOf))
+                     (params (paddr exec usize) (metadata exec M) (regions tracked (&mut MetaRegionOwners)))
+                     ;; vostd 3c6dc67d4 removed `ReprPerm`: from_unused's ghost is regions alone
+                     (body (let r (call ,from-unused (paddr metadata) (regions)))
                            (if-let (Ok x) r (then)
                                    (else (assert-requires mm::frame::inc_frame_ref_count (paddr) (regions))
                                          (let w_g (call mm::frame::inc_frame_ref_count (paddr) (regions))))))))
