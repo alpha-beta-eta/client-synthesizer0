@@ -64,12 +64,18 @@
         [(regexp-match #px"^(core|alloc|std)::ops::range::(.*)$" s) => (lambda (m) (format "~a::ops::~a" (cadr m) (caddr m)))]
         [else s]))
 
-;; How a trait is named in the client: ostd's by their crate path, the standard
-;; library's by their name (its paths go through private modules, and its
-;; traits are in the prelude), others (vstd) by their path.
+;; How a trait is named in the client: ostd's and the standard library's by
+;; their name, others (vstd) by their path.  The defining path can go through
+;; a private module: vostd eb1a9d044 made `sync::rcu` private, and
+;; `<Frame<M> as crate::sync::rcu::non_null::NonNullPtr>` is E0603 with no
+;; re-export suggestion (rustc offers none for a trait in a qualified path).
+;; As for datatypes (datatype-name), the name is resolved by the client's
+;; imports: the module's own `use` (`crate::sync::non_null::NonNullPtr`), or
+;; the import rustc suggests (repair.rkt), which takes the public re-export.
+;; ostd's traits have distinct names (135 at eb1a9d044).  design.md 4.2.
 (define (trait-ref p)
   (define s (format "~a" p))
-  (cond [(string-prefix? s "ostd::") (ostd-path->crate s)]
+  (cond [(regexp-match? #rx"^(ostd|crate)::" s) (last-seg s)]
         [(regexp-match? #rx"^(core|alloc|std)::" s) (last-seg s)]
         [else s]))
 

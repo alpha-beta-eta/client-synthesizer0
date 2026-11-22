@@ -31,3 +31,12 @@
                 (expr k method? ptypes))
               '(const crate::mm::MAX_NR_LEVELS))
 (check-equal? (expr k method? ptypes) '(call crate::mm::MAX_NR_LEVELS))
+
+;; an ostd trait is written by its name, resolved by the client's imports: its
+;; defining path can go through a private module (`sync::rcu`, vostd eb1a9d044)
+(define a `(> Call :target (CallTarget Fun (CallTargetKind Dynamic)
+                                       (Fun :path ostd::sync::rcu::non_null::NonNullPtr::ALIGN_BITS)
+                                       ((Typ TypParam "P")))
+              :args ()))
+(check-equal? (parameterize ([current-const-fn? (lambda (p) #t)]) (expr a method? ptypes))
+              '(const |<P as NonNullPtr>::ALIGN_BITS|))
