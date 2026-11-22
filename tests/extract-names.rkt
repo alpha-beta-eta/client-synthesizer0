@@ -11,7 +11,7 @@
 ;; an impl's associated constant goes through the self type, as a call does
 (define c `(> ConstVar (Fun :path ostd::mm::page_prop::impl&%26::AVAIL1_SPEC)))
 (define (method? _) #f)
-(define (ptypes _) #f)
+(define (ptypes . _) #f)
 (check-equal? (parameterize ([current-impl-path
                               (lambda (p typs)
                                 (and (equal? (format "~a" p) "ostd::mm::page_prop::impl&%26::AVAIL1_SPEC")
@@ -23,3 +23,11 @@
 (check-exn no? (lambda () (expr c method? ptypes)))
 ;; a module's constant stays as it was
 (check-equal? (expr `(> ConstVar (Fun :path ostd::mm::PAGE_SIZE)) method? ptypes) '(const crate::mm::PAGE_SIZE))
+
+;; a constant VIR calls as a function of no arguments (a trait's associated
+;; constant, `PagingConstsTrait::NR_LEVELS`) is written without `()` (E0618)
+(define k `(> Call :target (CallTarget Fun (CallTargetKind Static) (Fun :path ostd::mm::MAX_NR_LEVELS) ()) :args ()))
+(check-equal? (parameterize ([current-const-fn? (lambda (p) (equal? (format "~a" p) "ostd::mm::MAX_NR_LEVELS"))])
+                (expr k method? ptypes))
+              '(const crate::mm::MAX_NR_LEVELS))
+(check-equal? (expr k method? ptypes) '(call crate::mm::MAX_NR_LEVELS))

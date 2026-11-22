@@ -22,7 +22,7 @@
          "vir.rkt" "git.rkt" "../base/forms.rkt" (only-in "../model/api.rkt" type->text) "source-spec.rkt")
 (provide extract-tables
          ;; for tests/extract-names.rkt
-         expr current-impl-path generated-item-path? (struct-out no))
+         expr current-impl-path current-const-fn? generated-item-path? (struct-out no))
 
 (define vprefix "_VERUS_VERIFIED_")
 ;; the clients' module, beside the module under test (placement)
@@ -366,6 +366,14 @@
                         (with-handlers ([no? (lambda (_) #f)])
                           (map (lambda (t) (type->text (typ t))) (take-right typs (length free))))))
         `(method ,(car as) ,(string->symbol (if tf (format "~a::<~a>" m (string-join tf ", ")) m)) ,@(cdr as))]
+       ;; an associated constant (vostd 4676a774b: `const NR_LEVELS: PagingLevel`
+       ;; in PagingConstsTrait) is a function of no arguments in VIR; written
+       ;; `<C as PagingConstsTrait>::NR_LEVELS`, not `..::NR_LEVELS()` (E0618)
+       [(and (null? as) ((current-const-fn?) p))
+        (let ([s (ostd-path->crate p)])
+          `(const ,(string->symbol (if (regexp-match? #rx"impl&%" s)
+                                       (or ((current-impl-path) p typs) (fail 'impl-const))
+                                       (call-path s kind typs)))))]
        [else
          (let ([s (ostd-path->crate p)])
            (if (regexp-match? #rx"impl&%" s)
@@ -450,6 +458,9 @@
 ;; associated function of an impl (a path with impl&%) is written, through
 ;; its self type: `Cursor::<C, G>::cursor_new_input_valid`.
 (define current-impl-path (make-parameter (lambda (p typs) #f)))
+;; current-const-fn? : callee path -> whether it is a constant (item_kind Const),
+;; which VIR calls as a function of no arguments
+(define current-const-fn? (make-parameter (lambda (p) #f)))
 ;; A constant: an impl's associated constant (a path with impl&%, vostd
 ;; 4676a774b: bitflags' `PageFlags::AVAIL1`, `AVAIL1_SPEC` in spec code) is
 ;; written through the impl's self type as an associated function is
@@ -1314,6 +1325,9 @@
                    [(list 'Typ 'MutRef inner) inner]
                    [t t])))))
     (and t (with-handlers ([no? (lambda (_) #f)]) (type->text (typ t)))))
+  (define (const-fn? p)
+    (define f (hash-ref by-path (format "~a" p) #f))
+    (and f (match (field f 'item_kind) [(list 'ItemKind 'Const _ ...) #t] [_ #f])))
   (define (impl-path p typs)
     (define f (hash-ref by-path (format "~a" p) #f))
     (define it (and f (item-of f)))
@@ -1490,6 +1504,7 @@
                            (set-box! left-out (cons (list (fn-path f) (no-what e)) (unbox left-out))))])
       (define uses (box '()))
       (define e (parameterize ([current-impl-path impl-path]
+                               [current-const-fn? const-fn?]
                                [current-lifetimes lifetimes]
                                [current-lifetime-used (box #f)]
                                [current-ambiguous-types ambiguous]
