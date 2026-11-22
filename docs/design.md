@@ -232,6 +232,7 @@ client的失败指出requires的缺口; 反过来的问题是**哪些ensures子�
 
 ### 4.1 Verus和验证的语义
 
+- **"可能panic"的子句有两种写法.** `P ==> may_panic()`, 和vostd `0195b8176` (`eb1a9d044`中有65处) 起的`allowed_to_panic_if(P)` (vstd_extra的open spec函数, 即`P ==> internal::may_panic()`). 两者是同一个P: client在调用处`assume(!P)` (`with-no-panic`), 只在这样的子句处失败的client记为`failed-panic-only`, 分组时不算 (`panic-error?`). 只认第一种时, 新提交上没有一个client假定not P, 这些子句的断言全部失败 (cursor的`query`/`jump`/`find_next`, segment的`slice`, io的`fill`/`read_once`), 判定时都成了噪音 (2026-11-22, r3的F1中发现, 改后从C重跑).
 - **失败的断言之后Verus假定它成立.** 后面的断言可能借它的光而"通过", 后面的路径可能被报为空洞. 修好前面的失败再看后面; 空洞性判定只在没有更早的失败的路径上可靠.
 - **空洞有两种:** 假定矛盾 (client的requires, 表的requires, 之前失败的断言), 这时路径上的结论无效; 或者路径经过规格排除了的分支 (Err之后再调用得到Some), 这时它是一个事实. else分支的组合尤其常见后者.
 - **空洞性断言只在路径末尾.** 一个分支的末尾另加断言不行: 失败的`assert(false)`之后一切都空洞.

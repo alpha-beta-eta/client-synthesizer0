@@ -81,3 +81,13 @@
                                     "error: could not compile `ostd` (lib) due to 1 previous error"))])
   (check-equal? (length es) 1)
   (check-equal? (list-ref (car es) 4) '(("ostd/specs/mm/frame/linked_list/linked_list_owners.rs" . 595))))
+
+;; the clause written `allowed_to_panic_if(P)` (vostd eb1a9d044) is a "may panic here" clause too
+(check-true (panic-error? '(error "s2/3" 1 "assertion failed"
+                                  (text "assert(vstd_extra::panic::allowed_to_panic_if((range.end > v0.size()))); // requires of mm::frame::segment::impl&%5::slice"))))
+(check-true (panic-error? '(error "s2.1" 1 "precondition not satisfied" (text "let v = r.query();")
+                                  (callee "ostd/src/mm/page_table/cursor/mod.rs:900" "        allowed_to_panic_if(old(self).query_panic_condition(*old(owner), *old(regions))),"))))
+(check-true (panic-error? '(error "s2/1" 1 "assertion failed" (text "assert(f.clone_requires(*p));")
+                                  (expanded ("verified_libs/vstd_extra/src/panic.rs:17" "internal::may_panic()")))))
+(check-false (panic-error? '(error "s2/3" 1 "assertion failed"
+                                   (text "assert(allowed_to_panic_if_x(a)); // requires of f"))))

@@ -41,10 +41,16 @@
 ;; the callee's line).  Not judged (evaluation.md 7.1).
 ;; Also an error whose expansion (error-expanded) fails only at `may_panic()`:
 ;; the saturation clause inside an opaque requires such as `clone_requires`.
+;; The clause written `allowed_to_panic_if(P)` (vostd eb1a9d044; spec.rkt's
+;; panic-condition) is the same: the client's assertion of it, or a callee's
+;; line that is that clause.
 (define (panic-error? e)
   (or (regexp-match? #rx"may_panic[(][)][)]+; //" (error-text e))
+      (regexp-match? #rx"^ *assert[(](vstd_extra::panic::)?allowed_to_panic_if[(].*[)][)]; // requires of " (error-text e))
       (let ([c (error-callee e)])
-        (and c (pair? (cdr c)) (regexp-match? #rx"==> *(vstd_extra::panic::)?may_panic[(][)],?$" (cadr c))))
+        (and c (pair? (cdr c))
+             (or (regexp-match? #rx"==> *(vstd_extra::panic::)?may_panic[(][)],?$" (cadr c))
+                 (regexp-match? #rx"^ *(&&& *)?(vstd_extra::panic::)?allowed_to_panic_if[(].*[)],?$" (cadr c)))))
       (let ([leaves (error-expanded e)])
         (and (pair? leaves) (andmap panic-leaf? leaves)))))
 
@@ -52,7 +58,7 @@
 ;; that failed inside the asserted expression (run.rkt, --expand-errors), or '()
 (define (error-expanded e) (let ([x (assq 'expanded (filter pair? (cddddr e)))]) (if x (cdr x) '())))
 
-(define (panic-leaf? l) (regexp-match? #px"^(vstd_extra::panic::)?may_panic\\(\\)$" (cadr l)))
+(define (panic-leaf? l) (regexp-match? #px"^(vstd_extra::panic::)?(internal::)?may_panic\\(\\)$" (cadr l)))
 
 ;; ================================================================ plans
 

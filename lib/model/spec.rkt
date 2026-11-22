@@ -8,12 +8,18 @@
 ;; P of a "may panic here" clause `P ==> may_panic()` (`may_panic`
 ;; uninterpreted: satisfied only where not P holds); nested,
 ;; `A ==> (B ==> may_panic())` gives `A && B`.  #f for any other clause.
+;; vostd 0195b8176 (eb1a9d044) writes the clause `allowed_to_panic_if(P)`,
+;; vstd_extra's open spec fn `P ==> internal::may_panic()`: the same P
+;; (design.md 4.1).  Without it no client assumed not P any more (2026-11-22).
 (define (panic-condition c)
   (define (may-panic-call? e)
     (match e
       [`(call ,(? symbol? f)) (regexp-match? #rx"(^|::)may_panic$" (symbol->string f))]
       [_ #f]))
   (match c
+    [`(call ,(? symbol? f) ,p)
+     #:when (regexp-match? #rx"(^|::)allowed_to_panic_if$" (symbol->string f))
+     p]
     [`(implies ,a ,b)
      (cond [(may-panic-call? b) a]
            [(panic-condition b) => (lambda (p) `(and ,a ,p))]
