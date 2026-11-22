@@ -20,7 +20,9 @@
 ;; A function whose signature cannot be expressed is left out, with the reason.
 (require racket/list racket/match racket/string racket/file racket/pretty racket/system racket/port
          "vir.rkt" "git.rkt" "../base/forms.rkt" (only-in "../model/api.rkt" type->text) "source-spec.rkt")
-(provide extract-tables)
+(provide extract-tables
+         ;; for tests/extract-names.rkt
+         expr current-impl-path generated-item-path? (struct-out no))
 
 (define vprefix "_VERUS_VERIFIED_")
 ;; the clients' module, beside the module under test (placement)
@@ -49,6 +51,9 @@
 (define (params f) (let ([ps (field f 'params)]) (if (list? ps) (map unwrap ps) '())))
 (define (segments p) (string-split (format "~a" p) "::"))
 (define (last-seg p) (last (segments p)))
+;; An item Verus generates (`vdis%1%clone_clause_autoderived%`): its name,
+;; after the namespaces and inherited-as-impl, still has a `%` (design.md 4.2).
+(define (generated-item-path? p) (regexp-match? #rx"%" (last-seg p)))
 ;; The standard library's paths go through private modules too: VIR gives the
 ;; defining one (`core::ops::range::Range`), the client writes the public
 ;; re-export (`core::ops::Range`; E0603 otherwise, and rustc suggests an import,
@@ -191,7 +196,7 @@
     [(list '> 'Old a) `(old ,(x a))]
     [(list '> 'Const (list 'Constant 'Bool b)) (if (eq? b 'true) 'true 'false)]
     [(list '> 'Const (list 'Constant 'Int n)) (if (number? n) n (or (string->number (format "~a" n)) (fail 'int)))]
-    [(list '> 'ConstVar (list 'Fun ':path p) _ ...) `(const ,(string->symbol (ostd-path->crate p)))]
+    [(list '> 'ConstVar (list 'Fun ':path p) _ ...) `(const ,(string->symbol (const-path p)))]
     [(list '> 'Binary (list 'BinaryOp 'Arith (list 'ArithOp op _ ...)) a b) `(,(arith op) ,@(widen x a b))]
     [(list '> 'Binary (list 'BinaryOp 'Inequality (list 'InequalityOp op)) a b) `(,(ineq op) ,@(widen x a b))]
     [(list '> 'Binary (list 'BinaryOp 'Bitwise (list 'BitwiseOp op _ ...) _ ...) a b)
@@ -445,6 +450,15 @@
 ;; associated function of an impl (a path with impl&%) is written, through
 ;; its self type: `Cursor::<C, G>::cursor_new_input_valid`.
 (define current-impl-path (make-parameter (lambda (p typs) #f)))
+;; A constant: an impl's associated constant (a path with impl&%, vostd
+;; 4676a774b: bitflags' `PageFlags::AVAIL1`, `AVAIL1_SPEC` in spec code) is
+;; written through the impl's self type as an associated function is
+;; (design.md 4.2); `crate::..::impl&%26::AVAIL1_SPEC` is a parse error.
+(define (const-path p)
+  (define s (ostd-path->crate p))
+  (if (regexp-match? #rx"impl&%" s)
+      (or ((current-impl-path) p '()) (fail 'impl-const))
+      s))
 
 ;; A datatype is written by its last segment, which the client's imports
 ;; resolve (`use super::*`, the uses rustc suggests: ostd's own paths go
@@ -639,7 +653,7 @@
      (list `(ctor ,(string->symbol (if (equal? variant (last-seg p))
                                        (format "~a" (ostd-path->crate p))
                                        (format "~a::~a" (ostd-path->crate p) variant)))))]
-    [(list '> 'ConstVar (list 'Fun ':path p) _ ...) (list `(const ,(string->symbol (ostd-path->crate p))))]
+    [(list '> 'ConstVar (list 'Fun ':path p) _ ...) (list `(const ,(string->symbol (const-path p))))]
     ;; an integer type's bound (`usize::MAX`): a constant to the source, not to VIR
     [(list '> 'UnaryOpr (list 'UnaryOpr 'IntegerTypeBound _ ...) _ ...)
      (match (x e) [`(const ,n) (list `(const ,n))] [_ '()])]
@@ -1240,6 +1254,10 @@
          (match (field f 'kind) [(list 'FunctionKind (or 'Static 'TraitMethodImpl) _ ...) #t] [_ #f])
          ;; statics and consts are values, not functions
          (match (field f 'item_kind) [(list 'ItemKind (or 'Static 'Const) _ ...) #f] [_ #t])
+         ;; an item Verus generates (`vdis%1%clone_clause_autoderived%`, Verus
+         ;; 5ef50d52): its name, after the namespaces and inherited-as-impl,
+         ;; still has a `%`, which Rust cannot write (design.md 4.2)
+         (not (generated-item-path? (fn-path f)))
          ;; a broadcast lemma without parameters cannot be called, only `broadcast use`d
          (not (and (attr f 'broadcast_forall) (null? (params f))))
          ;; a trait default method an impl inherits is taken as that impl's method (its
