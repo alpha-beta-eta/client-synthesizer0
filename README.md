@@ -3,6 +3,7 @@
 > **For vostd maintainers:** the specification defects found at vostd `8e4b202d6`, each with the code, a
 > failing client, Verus's error and how to fix it, are in
 > [findings/defects-8e4b202d6.md](findings/defects-8e4b202d6.md) (English).
+> At vostd `eb1a9d044`, compared with that list (9 fixed upstream, 6 new): [findings/defects-eb1a9d044.md](findings/defects-eb1a9d044.md).
 
 为[vostd](https://github.com/asterinas/vostd) (Asterinas内核`ostd`的Verus验证版本) 合成**按真实用法调用API的client**, 用它们检验规格是否够调用者用; 列出并审计Verus信任而不检查的代码.
 
