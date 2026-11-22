@@ -45,6 +45,13 @@
 
 1. **[工具]** 导出VIR (检出要干净): `cargo dv focus --package ostd -- --no-verify --log vir --log-dir <目录>`; `racket cli.rkt vir-cache <crate.vir> VIR`.
 2. **[工具]** `racket cli.rkt scan VIR '^ostd::(mm|sync)(::|$)' data/auto out/scan`. 核对: 每个模块的探针`ok`数, 与上一次的表逐个比较; 由`ok`变坏的分清是vostd还是工具. 一类条目一起坏是抽取的bug, 改合成器 (H), 不逐条手修.
+   - 扫描之前先把旧表留一份 (`cp -a data/auto data/archive/auto-<旧提交>`), 下一步和比较要用.
+   - 不是`ok`的由一类原因造成时 (同一个编译错误, 整个模块`not-verified`), 是抽取的bug, 按I改合成器, 再整个重扫.
+2b. **[工具]** 名字跟着源码走 (换了提交之后, 2026-11-22补上): impl的编号会变 (`impl&%5::from_unused` → `impl&%7::from_unused`), 而调用知识, 往返的声明, 已知问题, 判定, 修改都按名字记. 按源码的键改写它们:
+   ```bash
+   racket cli.rkt rename-by-key data/archive/auto-<旧提交>/apis data/auto/apis data/auto/knowledge data/auto/identity.rktd data/issues data/verdicts data/fixes > out/<RUN>-rename.log
+   ```
+   核对: 改写的条数; `(no-new-entry ..)` (旧名字的键在新表中没有: 函数没了或改了签名) 记下, 用到它们的知识在B3中报出, 已知问题在E5中报出.
 3. **[工具]** `racket cli.rkt knowledge data/auto data/auto/knowledge > out/<RUN>-knowledge.log`. 每个模块必须`ok`, `(anchors .. (lost 0) (ambiguous 0))`. `(protocol-left-out NAME (API REASON) ..)`不是问题: 协议调用了抽取时按记下的原因 (`left-out.rktd`: `closure-bound`等) 留在表外的API, 这个协议不生成; 记下条数和原因, 不停下. `(protocol-outside ..)` (调用的API不在表中, 也没有记下的原因) 才是问题. `moved`的: `--fix`; 被标出漂移的条目 **[LLM]** 对照新源码重读, 读过之后才`--accept`. 不重读就不`--accept`.
 
 ## C. 生成和运行 [工具]
