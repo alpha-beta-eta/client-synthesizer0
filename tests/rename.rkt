@@ -26,4 +26,13 @@
 (check-true (string-contains? text "\"m::impl&%1::f in a string stays\""))
 (check-equal? (rename-file! k '()) 0)
 
+
+;; erasing keeps the type's name: X<T> and Z<U> are not the same function
+(define old3 (dir* "old3")) (define new3 (dir* "new3"))
+(table old3 (list (entry 'a::impl&%1::f "a::X<T>::f")))
+(table new3 (list (entry 'a::impl&%2::f "a::Z<U>::f")))
+(define-values (rs3 lost3) (renames old3 new3))
+(check-equal? rs3 '())
+(check-equal? lost3 '(a::impl&%1::f))
+
 (delete-directory/files dir)

@@ -214,6 +214,7 @@ client的失败指出requires的缺口; 反过来的问题是**哪些ensures子�
 - **运行与评估相同.** `regress`只跑证人, 表按配置的`auto`建 (证人调用的别的模块的表也并入), 运行目录, 续跑的键, 导入的修补都与评估一样 (`compare`照样可用). 检出由环境决定: 对原版跑一次, 用`CS_ENV`对打了补丁的检出再跑一次.
 - **状态是机械的.** 每个证人: `shows` (失败, 有错误匹配期望), `passes` (通过, 没有空洞), `other` (只在别处失败, 没有空洞), `vacuous` (有空洞的路径: 那条子句可能只因路径不可行而成立), `broken` (编译错误, 不良构: API的签名变了), `not-run`, `not-concluded` (sanity不是ok). 每个问题在原版上: `present` (有证人显示它), `gone` (每个证人中那条子句都不再失败, 即`passes`或`other`: 上游修了或规格变了, 对照diff判定), `undetected` (都不是: 证人要重新取), `no-witness` (没有能运行的证人, 数据写明为什么, 例如要往返的声明或某个claim); 在补丁上: `fixed` (每个证人`passes`或`other`), `not-fixed` (有证人仍`shows`), 或`undetected`. 判据是那条子句, 不是整个client通过: 证人常常还撞着别的问题或噪音 (计数饱和), 修一个问题不会使它们通过; 失败的断言之后Verus只假定它成立, 后面的子句照样检查, 所以别处的失败不影响这条子句的判断, 空洞的路径才影响.
 - **取证人.** `witness RUN CLIENT ..`从一次运行中取出client, 以它第一个不是panic的错误的身份 (`(requires API N)`或`(claim)`) 作为默认的期望, 打印成证人; 认不出身份时写`(EXPECTED)`, 它不是合法的期望, 读入时报错, 要人写. 人再确认那就是问题的那条子句.
+- **名字跟着源码走.** 证人, 知识, 判定都按VIR的名字 (`impl&%5::from_unused`) 记, impl的编号随提交变; `rename-by-key`按源码的键 (`Frame<M>::from_unused`) 把旧名字改成新名字. 键本身在self类型的泛型实参变了时也变 (vostd `9cfb11016`去掉了`VmSpace`的生命周期: `VmSpace<'a>::cursor` → `VmSpace::cursor`; `Cursor<'rcu, C, A>` → `Cursor<'rcu, C>`): 准确的键找不到时, 用去掉所有泛型实参的键 (`<Cursor as Iterator>::next`), 只在新旧两边都恰有一个时采用. trait或名字变了的 (`<Box<T> as NonNullPtrRef<'a>>::raw_as_ref` → `<Box<T> as NonNullPtr>::raw_as_ref`) 仍报为没有新条目, 那是API的变化, 由人看 (2026-11-22: 65个没有新条目的旧名字中32个是前一种).
 - 证人的client也受表的版本检查: 表换了提交, 证人随之对新的表检查良构, 签名变了的报为`broken`, 而不是悄悄地不跑.
 
 ### 3.12 可信代码 (原则2, 5, 7, 9)

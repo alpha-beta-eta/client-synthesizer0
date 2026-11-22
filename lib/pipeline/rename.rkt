@@ -25,13 +25,35 @@
               #:when k)
     (values (cadr x) k)))
 
+;; A key whose self type's generic arguments changed (vostd 9cfb11016 removed
+;; VmSpace's lifetime: `VmSpace<'a>::cursor` -> `VmSpace::cursor`; Cursor lost
+;; its parameter A: `Cursor<'rcu, C, A>::new` -> `Cursor<'rcu, C>::new`) is the
+;; same function.  When the exact key is in no new entry, the key with every
+;; generic argument list erased (`<Cursor as Iterator>::next`) is tried; it is
+;; taken only when exactly one old name and one new name have it, and the new
+;; name is not already the exact match of another.  A changed trait or name
+;; (`<Box<T> as NonNullPtrRef<'a>>::raw_as_ref` -> `<Box<T> as NonNullPtr>::..`)
+;; stays lost: that is an API change for a person to look at.
+(define (erase-generics k)
+  (define k2 (regexp-replace* #px"([A-Za-z0-9_])<[^<>]*>" k "\\1"))
+  (if (equal? k2 k) k (erase-generics k2)))
+
 (define (renames old-dir new-dir)
   (define old (keys-of old-dir))
   (define new (keys-of new-dir))
   (define by-key (for/hash ([(n k) (in-hash new)]) (values k n)))
+  (define exact-targets (for*/hash ([(n k) (in-hash old)] [m (in-value (hash-ref by-key k #f))] #:when m) (values m #t)))
+  (define (group h) (for/fold ([g (hash)]) ([(n k) (in-hash h)]) (hash-update g (erase-generics k) (lambda (l) (cons n l)) '())))
+  (define old-erased (group (for/hash ([(n k) (in-hash old)] #:unless (hash-ref by-key k #f)) (values n k))))
+  (define new-erased (group (for/hash ([(n k) (in-hash new)] #:unless (hash-ref exact-targets n #f)) (values n k))))
+  (define (loose n k)
+    (define e (erase-generics k))
+    (define os (hash-ref old-erased e '()))
+    (define ns (hash-ref new-erased e '()))
+    (and (= (length os) 1) (= (length ns) 1) (car ns)))
   (define-values (rs lost)
     (for/fold ([rs '()] [lost '()]) ([(n k) (in-hash old)])
-      (define m (hash-ref by-key k #f))
+      (define m (or (hash-ref by-key k #f) (loose n k)))
       (cond [(not m) (values rs (cons n lost))]
             [(eq? m n) (values rs lost)]
             [else (values (cons (cons n m) rs) lost)])))
