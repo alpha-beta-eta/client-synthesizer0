@@ -51,6 +51,10 @@
    ```bash
    racket cli.rkt rename-by-key data/archive/auto-<旧提交>/apis data/auto/apis data/auto/knowledge data/auto/identity.rktd data/issues data/verdicts data/fixes > out/<RUN>-rename.log
    ```
+   再给新提交的规格算指纹 (`knowledge`核对漂移要用, 没有时报`(no-digests ..)`, 不能`--accept`):
+   ```bash
+   racket cli.rkt digest VIR data/auto/apis <新提交> data/auto/digests/<新提交>.rktd
+   ```
    核对: 改写的条数; `(no-new-entry ..)` (旧名字的键在新表中没有: 函数没了或改了签名) 记下, 用到它们的知识在B3中报出, 已知问题在E5中报出.
 3. **[工具]** `racket cli.rkt knowledge data/auto data/auto/knowledge > out/<RUN>-knowledge.log`. 每个模块必须`ok`, `(anchors .. (lost 0) (ambiguous 0))`. `(protocol-left-out NAME (API REASON) ..)`不是问题: 协议调用了抽取时按记下的原因 (`left-out.rktd`: `closure-bound`等) 留在表外的API, 这个协议不生成; 记下条数和原因, 不停下. `(protocol-outside ..)` (调用的API不在表中, 也没有记下的原因) 才是问题. `moved`的: `--fix`; 被标出漂移的条目 **[LLM]** 对照新源码重读, 读过之后才`--accept`. 不重读就不`--accept`.
 
