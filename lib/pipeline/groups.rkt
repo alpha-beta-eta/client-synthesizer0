@@ -60,7 +60,10 @@
          (and (file-exists? cfg)
               (let* ([ev (file->value cfg)]
                      [auto (match (assq 'auto (cdr ev)) [`(auto ,a) a] [_ #f])]
-                     [dir (and auto (let-values ([(base _n _d) (split-path cfg)]) (simplify-path (build-path base auto))))]
+                     ;; absolute in the configurations `fixes` writes for its after/ runs
+                     [dir (and auto (if (absolute-path? auto)
+                                        (simplify-path auto)
+                                        (let-values ([(base _n _d) (split-path cfg)]) (simplify-path (build-path base auto)))))]
                      [f (and dir (build-path dir "digests" (string-append commit ".rktd")))])
                 (and f (file-exists? f) f))))))
 
