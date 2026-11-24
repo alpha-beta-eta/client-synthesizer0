@@ -22,7 +22,9 @@
          "vir.rkt" "git.rkt" "../base/forms.rkt" (only-in "../model/api.rkt" type->text) "source-spec.rkt")
 (provide extract-tables
          ;; for tests/extract-names.rkt
-         expr current-impl-path current-const-fn? generated-item-path? (struct-out no))
+         expr current-impl-path current-const-fn? generated-item-path? (struct-out no)
+         ;; for tests/placement-uses.rkt
+         placement crate-dependencies)
 
 (define vprefix "_VERUS_VERIFIED_")
 ;; the clients' module, beside the module under test (placement)
@@ -1641,12 +1643,18 @@
          (cons (cadr m) (and (car m) #t))))
      ;; `use self::x..` and `use x..` for a child x of the module are through the
      ;; module from the sibling; through a private child, not at all (rustc's
-     ;; import suggestions supply what is missing)
+     ;; import suggestions supply what is missing).  `use x..` for a dependency x
+     ;; of the crate is `use ::x..`: the client module's glob imports of the
+     ;; preludes bring in names too, and one of them may be x (vstd_extra's
+     ;; `external::smallvec` beside the `smallvec` crate: E0659, cpu::set)
+     (define deps (crate-dependencies vostd file))
      (define (relocate-use u)
        (match (regexp-match #px"^use (?:self::)?([A-Za-z_][A-Za-z0-9_]*)(::.*)$" u)
          [(list _ first rest)
           (define c (assoc first children))
-          (cond [(not c) (if (regexp-match? #px"^use self::" u) #f u)]
+          (cond [(and (not c) (member first deps) (not (regexp-match? #px"^use self::" u)))
+                 (format "use ::~a~a" first rest)]
+                [(not c) (if (regexp-match? #px"^use self::" u) #f u)]
                 [(cdr c) (format "use super::~a::~a~a" name first rest)]
                 [else #f])]
          [_ u]))
@@ -1675,6 +1683,31 @@
        (file ,(client-file file))
        (mod-file ,file)
        (uses ()))]))
+
+;; crate-dependencies : vostd file ("ostd/src/cpu/set.rs") -> (name ...)
+;; The names the crate of FILE gives its dependencies (the keys of its
+;; Cargo.toml's [dependencies] and [target.'..'.dependencies], `-` as `_`),
+;; except vstd and vstd_extra, which the client module imports by these names
+;; itself.
+(define (crate-dependencies vostd file)
+  (define root (match (regexp-match #px"^(.*?)/?src/" file) [(list _ r) r] [_ #f]))
+  (define toml (and root (build-path vostd (if (equal? root "") "Cargo.toml" (string-append root "/Cargo.toml")))))
+  (cond
+    [(and toml (file-exists? toml))
+     (let loop ([lines (file->lines toml)] [in? #f] [acc '()])
+       (cond
+         [(null? lines) (reverse acc)]
+         [else
+          (define l (string-trim (car lines)))
+          (cond
+            [(regexp-match? #px"^\\[" l)
+             (loop (cdr lines) (regexp-match? #px"^\\[(?:target\\..*\\.)?dependencies\\]$" l) acc)]
+            [(and in? (regexp-match #px"^([A-Za-z0-9_-]+)\\s*=" l))
+             => (lambda (m)
+                  (define n (string-replace (cadr m) "-" "_"))
+                  (loop (cdr lines) in? (if (member n '("vstd" "vstd_extra")) acc (cons n acc))))]
+            [else (loop (cdr lines) in? acc)])]))]
+    [else '()]))
 
 ;; mod.rs -> the same directory; NAME.rs -> NAME/
 (define (client-file file)
