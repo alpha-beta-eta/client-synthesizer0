@@ -91,3 +91,14 @@
                                   (expanded ("verified_libs/vstd_extra/src/panic.rs:17" "internal::may_panic()")))))
 (check-false (panic-error? '(error "s2/3" 1 "assertion failed"
                                    (text "assert(allowed_to_panic_if_x(a)); // requires of f"))))
+
+;; the summary (stdout) glued to an error's location (stderr) in the middle of a line
+;; (x1, cpu::set): the location is still the error's, the summary still read
+(let-values ([(v es) (parse-verus '("error: assertion failed"
+                                    "   --> ostd/src/cpu/cs_clients.rs:616:12verification results:: 0 verified, 77 errors (partial verification with `--verify-*`)"
+                                    ""
+                                    "    |"
+                                    "616 |     assert(false); // vacuity: must fail"))])
+  (check-equal? v '(0 77))
+  (check-equal? (cadr (car es)) "ostd/src/cpu/cs_clients.rs")
+  (check-equal? (caddr (car es)) 616))

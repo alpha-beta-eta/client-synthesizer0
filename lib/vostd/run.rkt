@@ -180,7 +180,16 @@
 ;;   error = (MESSAGE FILE LINE CALLEE LOCS)
 ;;   FILE, LINE: the first `-->` location; CALLEE: "file:line" of the first `:::` note, or #f;
 ;;   LOCS: every `-->` and `:::` location of the block, ((FILE . LINE) ...), in order
-(define (parse-verus lines)
+(define (parse-verus lines0)
+  ;; Verus prints the summary on stdout and the errors on stderr; written to one
+  ;; file they can interleave mid-line (`  --> f.rs:616:12verification results::
+  ;; ..`, cpu::set in x1): the summary starts a line of its own, else that
+  ;; location is lost and its client counted as verified (design.md 4.1)
+  (define lines
+    (append* (for/list ([l (in-list lines0)])
+               (match (regexp-match-positions #px"(?<=.)verification results::" l)
+                 [(list (cons s _)) (list (substring l 0 s) (substring l s))]
+                 [_ (list l)]))))
   (define verified
     (for/or ([l (in-list lines)])
       (match (regexp-match #px"verification results:: ([0-9]+) verified, ([0-9]+) errors" l)
