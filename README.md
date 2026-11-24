@@ -9,7 +9,7 @@
 
 这是[vostd-client-synthesizer](https://github.com/alpha-beta-eta/vostd-client-synthesizer) (下称"前身") 的整理版, 一个单独的仓库. 前身是一系列探索 (2026-11-06到2026-11-15, 记录在前身的`docs/`) 的累积: 每次试验都留下了代码, 选项和数据格式, 有的后来被更好的做法取代, 有的只为一次实验存在. 本版只保留确实带来结论的部分, 把试验中遇到的细节问题按原则一次改好, 而不是继续修补. 结果不要求与前身逐个client一致.
 
-设计和取舍见[docs/design.md](docs/design.md). 一轮评估的固定次序 (每步的命令, 谁做, 核对什么) 见[docs/workflow.md](docs/workflow.md), 给LLM照做的skill在`.claude/skills/client-synthesizer0/`. 前身的文档 (`docs/`, 本机上是`../vostd-client-synthesizer/docs/`) 记录了每个决定的来历和测量, 本版的文档只引用, 不重复.
+设计和取舍见[docs/design.md](docs/design.md); 各阶段方法的概览 (重点是client的枚举) 见[docs/methods.md](docs/methods.md), 一路踩过的坑见[docs/pitfalls.md](docs/pitfalls.md). 一轮评估的固定次序 (每步的命令, 谁做, 核对什么) 见[docs/workflow.md](docs/workflow.md), 给LLM照做的skill在`.claude/skills/client-synthesizer0/`. 前身的文档 (`docs/`, 本机上是`../vostd-client-synthesizer/docs/`) 记录了每个决定的来历和测量, 本版的文档只引用, 不重复.
 
 ## 与前身相比
 
