@@ -43,8 +43,10 @@
 
 只在vostd换了提交之后做 (前身evaluation.md 3.1, 逐层, 一次一层). 同一提交上的新一轮跳过B1, B2.
 
+**加入新的模块时** (2026-11-24, cpu, util, boot, task): 同一提交上也做B2 (不做B1, B2b的`rename-by-key`): 扫描的正则加上新模块, 在`data/auto`中整个重扫, 之前照样留旧表 (`data/archive/auto-<提交>-<日期>`); 旧模块的探针`ok`数必须逐个不变. 再做B2b的`digest` (新模块要有指纹), B3: 新模块的调用知识由 **[LLM]** 按前身`docs/knowledge-format.md`和`docs/knowledge-extract.md`从上游读出, 写进`data/auto/knowledge/<模块>.rktd`, 再核对. 这一轮的`CFG`只选新模块 (`(modules ..)`), 旧模块的结果不必重跑; 之后各轮的配置包括它们.
+
 1. **[工具]** 导出VIR (检出要干净): `cargo dv focus --package ostd -- --no-verify --log vir --log-dir <目录>`; `racket cli.rkt vir-cache <crate.vir> VIR`.
-2. **[工具]** `racket cli.rkt scan VIR '^ostd::(mm|sync)(::|$)' data/auto out/scan`. 核对: 每个模块的探针`ok`数, 与上一次的表逐个比较; 由`ok`变坏的分清是vostd还是工具. 一类条目一起坏是抽取的bug, 改合成器 (H), 不逐条手修.
+2. **[工具]** `racket cli.rkt scan VIR '^ostd::(mm|sync|cpu|util|boot|task)(::|$)' data/auto out/scan`. 核对: 每个模块的探针`ok`数, 与上一次的表逐个比较; 由`ok`变坏的分清是vostd还是工具. 一类条目一起坏是抽取的bug, 改合成器 (H), 不逐条手修.
    - 扫描之前先把旧表留一份 (`cp -a data/auto data/archive/auto-<旧提交>`), 下一步和比较要用.
    - 不是`ok`的由一类原因造成时 (同一个编译错误, 整个模块`not-verified`), 是抽取的bug, 按I改合成器, 再整个重扫.
 2b. **[工具]** 名字跟着源码走 (换了提交之后, 2026-11-22补上): impl的编号会变 (`impl&%5::from_unused` → `impl&%7::from_unused`), 而调用知识, 往返的声明, 已知问题, 判定, 修改都按名字记. 按源码的键改写它们:

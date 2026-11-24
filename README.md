@@ -79,7 +79,7 @@ racket cli.rkt env
 
 1. 建表 (每次vostd更新后): 导出VIR, 然后
    ```bash
-   racket cli.rkt scan VIR '^ostd::(mm|sync)(::|$)' data/auto out/scan
+   racket cli.rkt scan VIR '^ostd::(mm|sync|cpu|util|boot|task)(::|$)' data/auto out/scan
    ```
 2. 核对调用知识 (`data/auto/knowledge/`, 格式见前身的`docs/knowledge-format.md`, 加上本版的`must-close`):
    ```bash
