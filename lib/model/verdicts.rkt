@@ -9,7 +9,9 @@
 ;;            [(by API)]             only where API is the culprit (attribute.rkt) of the
 ;;                                   group's representative failure (groups.rkt: (at CLIENT ID API)),
 ;;                                   the one read and probed
-;;            (judgement J)          defect | not-defect | noise | by-design | known | needs-lemma | decision
+;;            (judgement J)          defect | strengthen | not-defect | noise | by-design | known | needs-lemma | decision
+;;                                   (strengthen: a defect whose fix needs more than one
+;;                                   clause, e.g. a stronger invariant; docs/workflow.md F1)
 ;;            [(issue ID)]           the known issue it is (data/issues)
 ;;            (reason STRING)
 ;;            (specs (API "HEX") ...) the fingerprints (vostd/spec-digest.rkt) of what was read:
@@ -19,11 +21,15 @@
 ;; now, stale where one changed or is gone: then the group is to be judged
 ;; again (groups.rkt puts stale verdicts among the unjudged).
 (require racket/list racket/match racket/file racket/string "../base/forms.rkt")
-(provide (struct-out verdict) read-verdicts verdict-for verdict-status read-digest-file key-apis write-verdict)
+(provide (struct-out verdict) read-verdicts verdict-for verdict-status read-digest-file key-apis write-verdict judgement?)
 
 (struct verdict (key module by judgement issue reason specs at file) #:transparent)
 
-(define judgements '(defect not-defect noise by-design known needs-lemma decision))
+(define judgements '(defect strengthen not-defect noise by-design known needs-lemma decision))
+
+;; judgement? : any -> boolean, one of the judgements above (checked when a
+;; verdict is recorded, not only when the file is read back)
+(define (judgement? j) (and (memq j judgements) #t))
 
 (define (read-verdicts where)
   (define files (if (directory-exists? where)
@@ -39,7 +45,7 @@
          [`(verdict ,items ...)
           (define (one k [d #f]) (match (assq k items) [`(,_ ,v) v] [#f d] [_ (bad)]))
           (define j (one 'judgement))
-          (unless (and (string? (one 'group)) (memq j judgements) (string? (one 'reason)) (string? (one 'at))) (bad))
+          (unless (and (string? (one 'group)) (judgement? j) (string? (one 'reason)) (string? (one 'at))) (bad))
           (define specs (match (assq 'specs items)
                           [`(specs (,(? symbol?) ,(? string?)) ...) (cdr (assq 'specs items))]
                           [_ (bad)]))

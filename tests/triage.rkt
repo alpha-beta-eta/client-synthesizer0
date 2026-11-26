@@ -74,3 +74,14 @@
 (check-equal? (map (lambda (b a) (group-status b a)) '(3 3 3 0) '(0 1 3 0)) '(fixed reduced unchanged no-clients))
 
 (delete-directory/files dir)
+
+;; strengthen (docs/workflow.md F1, 2026-11-26): a judgement like the others,
+;; read back from a file; an unknown judgement is refused
+(check-true (judgement? 'strengthen))
+(check-false (judgement? 'stronger))
+(define vfile2 (make-temporary-file))
+(write-forms vfile2 `((verdict (group "assert(r.x()); // claim") (judgement strengthen) (reason "needs the free list's invariant")
+                               (specs (m::make "bb")) (at "c"))))
+(check-equal? (verdict-judgement (car (read-verdicts vfile2))) 'strengthen)
+(write-forms vfile2 `((verdict (group "g") (judgement stronger) (reason "r") (specs) (at "c"))))
+(check-exn #rx"not a verdict" (lambda () (read-verdicts vfile2)))

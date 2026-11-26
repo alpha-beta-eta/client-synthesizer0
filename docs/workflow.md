@@ -108,10 +108,15 @@ racket cli.rkt groups RUN data/auto/knowledge data/issues --verdicts data/verdic
 - 问: 真实调用者需不需要这个事实? 同级的函数给了吗? 下层的给了吗?
 - 机械的事实先看: `refute`的`refuted` (client所问的在那里不成立), `provable`的`proved` (责任者有而不给), `confirm`的`confirmed`, `rests-on`.
 - **然后读`(members ..)`中的每个client**: 理由能解释它自己的失败吗 (缺的是同一个事实, 或是同一个client的错)? 组按第一个失败的子句分, 同一子句的client可能因不同的事实失败 (真实的调用者在一个`noise`组里, 一个缺自己requires的client在一个`defect`组里). 组的判定按多数; 原因不同的client逐个写进`out/<RUN>-f/clients.rktd`: `(client MODULE NAME JUDGEMENT "KEY" "REASON")`. 编译错误的client和空洞地通过的client (`results.rktd`中的`(vacuous ..)`) 也在这里判.
-- 用`racket cli.rkt verdict RUN MODULE KEY JUDGEMENT REASON data/verdicts/round-<日期>.rktd [--issue ID]`记下组的判定. JUDGEMENT: `defect`, `not-defect`, `noise`, `by-design`, `known`, `needs-lemma`, `decision`. 不是`defect`也不是`decision`的现在就记下; `defect`的 (组或client) 进F2; `decision`的汇总到F5.
+- 用`racket cli.rkt verdict RUN MODULE KEY JUDGEMENT REASON data/verdicts/round-<日期>.rktd [--issue ID]`记下组的判定. JUDGEMENT: `defect`, `strengthen`, `not-defect`, `noise`, `by-design`, `known`, `needs-lemma`, `decision`. 不是`defect`, `strengthen`, `decision`的现在就记下; `defect`和`strengthen`的 (组或client) 进F2; `decision`的汇总到F5.
+- **`defect`, `strengthen`, `decision`的分界** (2026-11-26). 前身evaluation.md 7.3的"需要决定" (修改要加可信代码, 或是设计问题, 或要全局不变式) 把两类混在了一起: 在mm::heap上, 空闲地址互不相同, 精确的计数这样的组被判为`decision`, 于是没有人去修, 而独立的人工验证 (vostd PR #923) 写出了它们. 现在分三类:
+  - `defect`: 真实调用者需要的事实, 加一条责任者证得出的子句 (或转发下层已有的) 就给出.
+  - `strengthen`: 真实调用者需要, 代码也确实保证, 但给出它要多于一条子句: 加强或导出不变式, 关于数据结构的证明, 引理, 同时改几个函数. 不需要谁做选择.
+  - `decision`: 要维护者选择的: 修改要加或加强可信代码 (给`external_body`函数契约, `assume`), 改签名或公开的API, 在两种行为之间选 (panic还是静默返回, `allow_panic`的构建), 或者这个事实该不该承诺本身有争议. F4之后仍没有确认的`defect`/`strengthen`也记为`decision` (见F4).
+  判断时问: 如果有人有时间写证明, 维护者还需要决定什么吗? 不需要, 就是`strengthen`, 不是`decision`.
 - 判定很多时分给几个子代理 (按领域, 每个子代理的组和它们的全部client一起给它); 机械的核对 (理由与client是否一致) 可以用便宜的模型.
 
-**F2. 写修改 [LLM]: 所有defect候选, 一次.** 组的和client的, 每个写成数据 (`(fix ID (groups ..) (why ..) (replace FILE OLD NEW) ..)`, design.md 3.9); client的写它失败的子句的组键. 规则:
+**F2. 写修改 [LLM]: 所有defect和strengthen候选, 一次.** 组的和client的, 每个写成数据 (`(fix ID (groups ..) (why ..) (replace FILE OLD NEW) ..)`, design.md 3.9); client的写它失败的子句的组键. 规则:
 
 - 只改规格: 加ensures, 循环不变式, 几行证明; 不加`assume`/`admit`/`external_body`; 不给`external_body`函数加ensures, **也不改`external_body`函数的契约所用的open spec函数** (那是不经证明地加强可信的契约, r1的R50).
 - **不替换基线中的修改** (基线: 以前确认了的修改, 见F3); 要在同一处多给事实, 另写一个修改, 编辑不与基线的重叠.
@@ -139,8 +144,8 @@ F4之后仍没有确认的, 记为`decision`, 理由写明 (修改证不出, 组
 **F5. 记录, 一次问人 [工具, 人决定].**
 
 - 写成"已确认的缺陷"的条件: `confirm`或`fixes`中`confirmed`, 或按前身evaluation.md第8节手工走完 (失败的client通过且没有新的空洞, 被改的模块0 errors, 整个ostd 0 errors, 合并补丁后再验证一次).
-- **直接记下, 不问** (2026-11-17用户定): `fixes`中`confirmed`的修改所确认的组 (单独或`with`成立, 组原来的client都通过或在别处失败, 超时的不算), 且修改**没有标记**: 事实中的`(rests-on ..)`没有`assume`/`admit`, `(attributes ..)`为空, 写修改和判定的人都没有指出它改了`external_body`函数的契约所用的open spec函数 (R50那类), 与已有的判定不冲突 (同一原因的client没有被判为`by-design`/`not-defect`). 写进`data/issues/` (格式`lib/model/issues.rkt`), 证人用`witness`取出, 期望按子句的身份; 组的判定记为`defect --issue ID`. 下一轮的基线: `fixes-base`的输出.
-- **汇总后一次问人**: `decision`; 带标记的`defect` (列出标记: 依靠的`assume`的位置, 属性, 改的open spec函数); 判定之间的冲突; 标为**[人]**的. 先不记; 人定了再记. 只调用`external_body`函数的不算标记, 列在记录中.
+- **直接记下, 不问** (2026-11-17用户定): `fixes`中`confirmed`的修改所确认的组 (单独或`with`成立, 组原来的client都通过或在别处失败, 超时的不算), 且修改**没有标记**: 事实中的`(rests-on ..)`没有`assume`/`admit`, `(attributes ..)`为空, 写修改和判定的人都没有指出它改了`external_body`函数的契约所用的open spec函数 (R50那类), 与已有的判定不冲突 (同一原因的client没有被判为`by-design`/`not-defect`). 写进`data/issues/` (格式`lib/model/issues.rkt`), 证人用`witness`取出, 期望按子句的身份; 组的判定记为原来的判定 (`defect`或`strengthen`) 加`--issue ID`. 下一轮的基线: `fixes-base`的输出.
+- **汇总后一次问人**: `decision`; 带标记的`defect`/`strengthen` (列出标记: 依靠的`assume`的位置, 属性, 改的open spec函数); 判定之间的冲突; 标为**[人]**的. 先不记; 人定了再记. 只调用`external_body`函数的不算标记, 列在记录中.
 - 记完再跑一次D: 新组应当都有了标签; 再跑E5的回归: 新的问题都应`present`.
 
 ## G. 可信代码 [工具, LLM审计, 人决定]

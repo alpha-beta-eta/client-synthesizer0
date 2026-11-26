@@ -32,6 +32,8 @@
 ;; what is mechanical filled in: the culprit (unless by? is #f), the
 ;; fingerprints of the key's APIs and the culprit at the run's commit, the commit.
 (define (record-verdict run-dir m key j reason file #:issue [issue #f] #:by? [by? #t] #:digests [dfile #f])
+  (unless (judgement? j)
+    (error 'verdict "unknown judgement ~a (defect, strengthen, not-defect, noise, by-design, known, needs-lemma, decision; docs/workflow.md F1)" j))
   (define mod (findf (lambda (x) (equal? (cadr x) m)) (group-failures run-dir #f (pregexp (string-append "^" (regexp-quote m) "$")))))
   (define g (and mod (findf (lambda (g) (and (pair? g) (eq? (car g) 'group) (equal? (cadr g) key))) (cddr mod))))
   (unless g (error 'verdict "no group ~s in ~a of ~a" key m run-dir))
