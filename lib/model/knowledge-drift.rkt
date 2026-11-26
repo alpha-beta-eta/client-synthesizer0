@@ -64,30 +64,34 @@
 ;; splice-meta : text commit ((API . HEX) ...) -> text, with (at ..) and
 ;; (spec-digests ..) replaced, or added after the (module ..) form.  The
 ;; forms are located by read-syntax, so comments elsewhere are kept.
+;; The offsets are character offsets: the port does not count lines, since a
+;; port that does counts CR-LF as one position, and on a file with CR-LF line
+;; ends every splice landed one character early per line (2026-11-26, the
+;; heap's knowledge written on Windows).  The new forms use the file's line end.
 (define (splice-meta text commit digests)
   (define in (open-input-string text))
-  (port-count-lines! in)
   (define spans                         ; ((START END HEAD) ...), 0-based offsets
     (let loop ([acc '()])
       (define x (read-syntax 'knowledge in))
       (if (eof-object? x) (reverse acc)
           (let ([d (syntax->datum x)] [a (sub1 (syntax-position x))])
             (loop (cons (list a (+ a (syntax-span x)) (and (pair? d) (car d))) acc))))))
+  (define nl (if (regexp-match? #rx"\r\n" text) "\r\n" "\n"))
   (define drop (filter (lambda (s) (memq (caddr s) '(at spec-digests))) spans))
   (define meta
     (string-append
-     (format "\n(at ~s)\n(spec-digests" commit)
-     (apply string-append (for/list ([d (in-list digests)]) (format "\n  (~a ~s)" (car d) (cdr d))))
+     (format "~a(at ~s)~a(spec-digests" nl commit nl)
+     (apply string-append (for/list ([d (in-list digests)]) (format "~a  (~a ~s)" nl (car d) (cdr d))))
      ")"))
-  ;; the old forms go with the newline before each, back to front
+  ;; the old forms go with the line end before each, back to front
   (define without
     (for/fold ([t text]) ([s (in-list (reverse drop))])
-      (string-append (regexp-replace #rx"\n$" (substring t 0 (car s)) "") (substring t (cadr s)))))
+      (string-append (regexp-replace #rx"\r?\n$" (substring t 0 (car s)) "") (substring t (cadr s)))))
   ;; after (module ..), which comes before them, so its offset is unchanged
   (define me (for/first ([s (in-list spans)] #:when (eq? (caddr s) 'module)) (cadr s)))
   (if me
       (string-append (substring without 0 me) meta (substring without me))
-      (string-append meta "\n" without)))
+      (string-append meta nl without)))
 
 ;; knowledge-apis : entries -> (API ...): the APIs the entries name
 (define (knowledge-apis k)
